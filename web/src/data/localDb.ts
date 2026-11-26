@@ -10,7 +10,7 @@ export interface Category { id: string; name: string; sortOrder: number }
 export interface Product { id: string; categoryId: string | null; name: string; brand?: string; isDevice: boolean; isActive: boolean }
 export interface Variant {
   id: string; productId: string; flavor?: string; nicotineMg?: number; sizeMl?: number; color?: string
-  priceCentavos: number; isActive: boolean
+  priceCentavos: number; costCentavos?: number; isActive: boolean
 }
 /** Stock at THIS device's branch (refreshed on sync, decremented locally on sale). */
 export interface StockRow { variantId: string; quantity: number }

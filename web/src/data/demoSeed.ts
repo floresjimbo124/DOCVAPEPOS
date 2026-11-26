@@ -40,7 +40,7 @@ export async function seedDemoIfEmpty(db: LocalDb) {
       { id: 'p-kit', categoryId: 'c-dev', name: 'Pod Kit X', brand: 'VapeTech', isDevice: true, isActive: true },
     ])
     const v = (id: string, productId: string, priceCentavos: number, x: Partial<Variant> = {}): Variant =>
-      ({ id, productId, priceCentavos, isActive: true, ...x })
+      ({ id, productId, priceCentavos, costCentavos: Math.round(priceCentavos * 0.6), isActive: true, ...x }) // demo cost: 60% of price
     const variants = [
       v('v-salt-mango-30', 'p-salt', 35000, { flavor: 'Mango', nicotineMg: 30, sizeMl: 30 }),
       v('v-salt-mango-50', 'p-salt', 37000, { flavor: 'Mango', nicotineMg: 50, sizeMl: 30 }),

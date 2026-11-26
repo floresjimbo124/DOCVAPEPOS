@@ -42,7 +42,10 @@ export default function App() {
   if (clocking) return <Attendance branchId={device.branchId} branchName={device.branchName} onDone={() => setClocking(false)} />
   if (!staff) {
     return <PinLogin branchName={device.branchName} onLogin={setStaff}
-      footer={<button className="btn" onClick={() => setClocking(true)}>Clock in / out</button>} />
+      footer={<>
+        <button className="btn" onClick={() => setClocking(true)}>Clock in / out</button>
+        <a className="link" href="/admin">Owner login</a>
+      </>} />
   }
   if (shift === undefined) return <p className="center-screen">Loading…</p>
   if (shift === null) {
