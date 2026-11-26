@@ -17,6 +17,23 @@ import { PinLogin } from './pos/PinLogin'
 import { Register } from './pos/Register'
 import { OpenShift, ZReading } from './pos/Shift'
 
+/** First screen on a device that isn't a register yet: who are you? */
+function Welcome({ onSetup, onDemo }: { onSetup: () => void; onDemo?: () => void }) {
+  return (
+    <div className="center-screen">
+      <div className="card login">
+        <span className="logo big"><img src="/logo.png" alt="DOCVAPE – Drip of Clouds" /></span>
+        <h2>Welcome</h2>
+        <p className="muted">How do you want to use DOCVAPE POS on this device?</p>
+        <a className="btn primary xl" href="/admin">Owner / Manager login</a>
+        <button className="btn xl" onClick={onSetup}>Set up this tablet as a register</button>
+        <p className="muted">Registers are set up once by the owner or branch manager. After that, cashiers log in here with their PIN.</p>
+        {onDemo && <button className="link" onClick={onDemo}>Try it with demo data (testing only)</button>}
+      </div>
+    </div>
+  )
+}
+
 async function startDemo() {
   await seedDemoIfEmpty(db)
   await seedDemoStaffIfEmpty(db)
@@ -49,11 +66,14 @@ export default function App() {
   const lock = () => { setStaff(undefined); setShift(undefined) }
 
   if (!saved) return <p className="center-screen">Loading…</p>
-  if (!device || setup) {
+  if (!device && !setup) {
     if (!isServerConfigured()) return <p className="center-screen">Loading…</p>
-    return <DeviceSetup current={device} onDone={() => { setSetup(false); lock() }}
-      onDemo={device ? undefined : () => void startDemo()} onCancel={device ? () => setSetup(false) : undefined} />
+    return <Welcome onSetup={() => setSetup(true)} onDemo={import.meta.env.DEV ? () => void startDemo() : undefined} />
   }
+  if (setup) {
+    return <DeviceSetup current={device} onDone={() => { setSetup(false); lock() }} onCancel={() => setSetup(false)} />
+  }
+  if (!device) return <p className="center-screen">Loading…</p>
   if (closed) {
     return <ZReading branchName={device.branchName} shift={closed.shift} summary={closed.summary} staffName={closed.by}
       onDone={() => { setClosed(undefined); lock() }} />
