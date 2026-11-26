@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import CountUp from '../components/reactbits/CountUp'
 import { db, type Product, type VariantRow } from '../data/localDb'
 import { addToCart, discountAmount, emptyCart, peso, setQuantity, subtotal, total, type CartState } from '../domain/cart'
+import { useTheme } from '../theme'
 import { Checkout } from './Checkout'
 
 interface Props { branchId: string; shiftId: string; staffId: string; branchName?: string; staffName?: string }
@@ -42,6 +43,7 @@ export function Register({ branchName = 'Demo branch', staffName = 'Demo cashier
   const [toast, setToast] = useState<string>()
   const [bump, setBump] = useState(0) // re-triggers the "added" pulse on the cart button
   const online = useOnline()
+  const [theme, toggleTheme] = useTheme()
 
   const categories = useLiveQuery(() => db.categoriesSorted(), []) ?? []
   const activeCat = categoryId ?? categories[0]?.id
@@ -125,6 +127,8 @@ export function Register({ branchName = 'Demo branch', staffName = 'Demo cashier
         <div className="status">
           <span className={online ? 'pill ok' : 'pill off'}><i />{online ? 'Online' : 'Offline – still selling'}</span>
           {pending > 0 && <span className="pill warn">{pending} to sync</span>}
+          <button className="theme-toggle" onClick={toggleTheme} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>{theme === 'dark' ? '☀' : '☾'}</button>
         </div>
       </header>
 
