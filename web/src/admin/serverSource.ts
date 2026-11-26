@@ -95,7 +95,7 @@ export function serverSource(c: SupabaseClient, branchId: string | null): BackOf
     },
     async variants() {
       const rows = await all<{ id: string; flavor: string | null; nicotine_mg: number | null; size_ml: number | null; color: string | null; cost: number; products: { name: string } | null }>(
-        () => c.from('variants').select('id,flavor,nicotine_mg,size_ml,color,cost,products(name)'))
+        () => c.from('variants').select('id,flavor,nicotine_mg,size_ml,color,cost,products!product_id(name)'))
       return new Map(rows.map((v) => [v.id, {
         name: v.products?.name ?? 'Item', costCentavos: cents(v.cost),
         label: variantLabel({ flavor: v.flavor ?? undefined, nicotineMg: v.nicotine_mg ?? undefined, sizeMl: v.size_ml ?? undefined, color: v.color ?? undefined } as never),

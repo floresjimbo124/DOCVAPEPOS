@@ -9,6 +9,7 @@ import { db } from '../data/localDb'
 import { supabase } from '../data/supabase'
 import type { Period } from '../domain/reports'
 import { useTheme } from '../theme'
+import { ErrorBox } from './ErrorBox'
 import { InventoryPage, ProductsPage, type BranchRow } from './catalog'
 import { AttendancePage, DashboardPage, ExpensesPage, LockedPage, TransactionsPage } from './pages'
 import { serverSource } from './serverSource'
@@ -153,7 +154,11 @@ function Live({ client, email }: { client: SupabaseClient; email: string }) {
   return (
     <Shell source={source} who={`${me.full_name} · ${me.role === 'owner' ? 'Owner' : 'Manager'}`} onExit={signOut}
       checkPin={async (pin) => (await client.rpc('check_my_pin', { p_pin: pin })).data === true}
-      pinHint={me.pin_set ? undefined : 'You have no PIN yet. Set it when you set up the first register (tap "Set up this device for a branch" on the PIN screen).'}
+      createPin={me.pin_set ? undefined : async (pin) => {
+        const { error } = await client.rpc('set_staff_pin', { p_staff: me.staff_id, p_pin: pin })
+        if (error) throw new Error(error.message)
+        setMe({ ...me, pin_set: true })
+      }}
       server={{ client, branches, branchId, setBranchId, isOwner: me.role === 'owner', reload: () => setVersion((v) => v + 1) }} />
   )
 }
@@ -163,8 +168,9 @@ interface ServerCtx {
   isOwner: boolean; reload: () => void
 }
 
-function Shell({ source, who, onExit, checkPin, pinHint, server }: {
-  source: BackOfficeSource; who: string; onExit: () => void; checkPin: (pin: string) => Promise<boolean>; pinHint?: string; server?: ServerCtx
+function Shell({ source, who, onExit, checkPin, createPin, server }: {
+  source: BackOfficeSource; who: string; onExit: () => void; checkPin: (pin: string) => Promise<boolean>
+  createPin?: (pin: string) => Promise<void>; server?: ServerCtx
 }) {
   const [page, setPage] = useState<Page>('dashboard')
   const [period, setPeriod] = useState<Period>('today')
@@ -213,7 +219,8 @@ function Shell({ source, who, onExit, checkPin, pinHint, server }: {
           </div>
         </header>
         {source.kind === 'preview' && <p className="notice">Preview: showing only sales and records saved on this device. All branches appear once the server is connected.</p>}
-        {item.locked && !unlocked ? <PinLock check={checkPin} hint={pinHint} onUnlock={() => setUnlocked(true)} /> :
+        <ErrorBox resetKey={page}>
+        {item.locked && !unlocked ? createPin ? <CreatePin save={createPin} onDone={() => setUnlocked(true)} /> : <PinLock check={checkPin} onUnlock={() => setUnlocked(true)} /> :
           server && page === 'products' ? <ProductsPage client={server.client} isOwner={server.isOwner} /> :
           server && page === 'inventory' ? <InventoryPage client={server.client} branches={server.branches} branchId={server.branchId} /> :
           page === 'dashboard' ? <DashboardPage source={source} period={period} /> :
@@ -221,12 +228,40 @@ function Shell({ source, who, onExit, checkPin, pinHint, server }: {
           page === 'expenses' ? <ExpensesPage source={source} period={period} /> :
           page === 'attendance' ? <AttendancePage source={source} period={period} /> :
           <LockedPage page={page} />}
+        </ErrorBox>
       </main>
     </div>
   )
 }
 
-function PinLock({ check: verify, hint, onUnlock }: { check: (pin: string) => Promise<boolean>; hint?: string; onUnlock: () => void }) {
+/** First time: the owner/manager has no PIN yet, so they choose one here. */
+function CreatePin({ save, onDone }: { save: (pin: string) => Promise<void>; onDone: () => void }) {
+  const [pin, setPin] = useState('')
+  const [pin2, setPin2] = useState('')
+  const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+  async function submit() {
+    if (!/^[0-9]{4,6}$/.test(pin)) return setError('Your PIN must be 4–6 digits.')
+    if (pin !== pin2) return setError("The two PINs don't match.")
+    setBusy(true)
+    try { await save(pin); onDone() } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+  const digits = (v: string) => v.replace(/\D/g, '')
+  return (
+    <form className="card pinlock" onSubmit={(e) => { e.preventDefault(); void submit() }}>
+      <h2>🔒 Create your PIN</h2>
+      <p className="muted">You'll use this PIN to open these pages, to log in at the register and to approve voids and refunds. 6 digits is safest.</p>
+      <label className="field"><span>New PIN (4–6 digits)</span>
+        <input type="password" inputMode="numeric" autoComplete="off" maxLength={6} value={pin} onChange={(e) => { setPin(digits(e.target.value)); setError(undefined) }} /></label>
+      <label className="field"><span>PIN again</span>
+        <input type="password" inputMode="numeric" autoComplete="off" maxLength={6} value={pin2} onChange={(e) => { setPin2(digits(e.target.value)); setError(undefined) }} /></label>
+      {error && <p className="error" role="alert">{error}</p>}
+      <button className="btn primary xl" disabled={busy || pin.length < 4 || pin2.length < 4}>{busy ? 'Saving…' : 'Save PIN and unlock'}</button>
+    </form>
+  )
+}
+
+function PinLock({ check: verify, onUnlock }: { check: (pin: string) => Promise<boolean>; onUnlock: () => void }) {
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string>()
   async function check() {
@@ -237,7 +272,6 @@ function PinLock({ check: verify, hint, onUnlock }: { check: (pin: string) => Pr
     <form className="card pinlock" onSubmit={(e) => { e.preventDefault(); void check() }}>
       <h2>🔒 Enter owner or manager PIN</h2>
       <p className="muted">Products, inventory, staff and settings are protected so prices and staff can't be changed without a PIN.</p>
-      {hint && <p className="notice">{hint}</p>}
       <label className="field"><span>PIN</span>
         <input type="password" inputMode="numeric" autoComplete="off" maxLength={6} value={pin} onChange={(e) => { setPin(e.target.value.replace(/\D/g, '')); setError(undefined) }} /></label>
       {error && <p className="error" role="alert">{error}</p>}

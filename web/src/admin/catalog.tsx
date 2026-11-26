@@ -17,7 +17,7 @@ const cents = (x: number | string) => Math.round(Number(x) * 100)
 
 async function fetchCatalog(c: SupabaseClient) {
   const [p, k] = await Promise.all([
-    c.from('products').select('id,name,brand,category_id,is_device,is_active,variants(id,flavor,nicotine_mg,size_ml,color,price,cost,is_active)').order('name'),
+    c.from('products').select('id,name,brand,category_id,is_device,is_active,variants!product_id(id,flavor,nicotine_mg,size_ml,color,price,cost,is_active)').order('name'),
     c.from('categories').select('id,name,sort_order').order('sort_order').order('name'),
   ])
   if (p.error || k.error) throw new Error((p.error ?? k.error)!.message)
