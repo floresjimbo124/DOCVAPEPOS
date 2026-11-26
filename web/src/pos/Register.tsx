@@ -9,6 +9,7 @@ import { addToCart, discountAmount, emptyCart, peso, setQuantity, subtotal, tota
 import { useTheme } from '../theme'
 import type { ShiftSummary } from '../domain/shift'
 import { Checkout } from './Checkout'
+import { SalesSheet } from './Sales'
 import { CashMoveSheet, CloseShiftSheet } from './Shift'
 
 interface Props {
@@ -41,7 +42,7 @@ const StockBadge = ({ n }: { n: number }) =>
 
 export function Register({ device, staff, shift, onLock, onShiftClosed }: Props) {
   const ids = { branchId: device.branchId, shiftId: shift.id, staffId: staff.id }
-  const [panel, setPanel] = useState<'cash' | 'close'>()
+  const [panel, setPanel] = useState<'cash' | 'close' | 'sales'>()
   const [cart, setCart] = useState<CartState>(emptyCart)
   const [query, setQuery] = useState('')
   const [categoryId, setCategoryId] = useState<string>()
@@ -137,6 +138,7 @@ export function Register({ device, staff, shift, onLock, onShiftClosed }: Props)
         <div className="status">
           <span className={online ? 'pill ok' : 'pill off'}><i />{online ? 'Online' : 'Offline – still selling'}</span>
           {pending > 0 && <span className="pill warn">{pending} to sync</span>}
+          <button className="topbtn" onClick={() => setPanel('sales')}>Sales</button>
           <button className="topbtn" onClick={() => setPanel('cash')}>Cash &amp; expenses</button>
           <button className="topbtn" onClick={() => setPanel('close')} disabled={cart.lines.length > 0}
             title={cart.lines.length ? 'Finish or clear the current sale first' : undefined}>Close shift</button>
@@ -217,6 +219,7 @@ export function Register({ device, staff, shift, onLock, onShiftClosed }: Props)
       )}
 
       {checkingOut && <Checkout cart={cart} setCart={setCart} ids={ids} onCancel={() => setCheckingOut(false)} onComplete={onComplete} />}
+      {panel === 'sales' && <SalesSheet shift={shift} staff={staff} onClose={() => setPanel(undefined)} />}
       {panel === 'cash' && <CashMoveSheet shift={shift} staff={staff} onClose={() => setPanel(undefined)} />}
       {panel === 'close' && <CloseShiftSheet shift={shift} staff={staff} onCancel={() => setPanel(undefined)} onClosed={onShiftClosed} />}
       {toast && <div className="toast" role="status">✓ {toast}</div>}

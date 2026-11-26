@@ -2,6 +2,7 @@
 // the server version (all branches) plugs in here once Supabase sync is connected.
 
 import { db, variantLabel } from '../data/localDb'
+import type { Adjustment } from '../domain/adjust'
 import type { Punch } from '../domain/attendance'
 import type { SalePayload } from '../domain/cart'
 import type { Expense } from '../domain/shift'
@@ -14,6 +15,7 @@ export interface BackOfficeSource {
   sales(from: number, to: number): Promise<SalePayload[]>
   expenses(from: number, to: number): Promise<Expense[]>
   punches(from: number, to: number): Promise<Punch[]>
+  adjustments(from: number, to: number): Promise<Adjustment[]>
   staff(): Promise<StaffInfo[]>
   variants(): Promise<Map<string, VariantInfo>>
 }
@@ -31,6 +33,9 @@ export const previewSource: BackOfficeSource = {
   },
   async punches(from, to) {
     return (await db.punches.where('at').between(from, to, true, true).toArray()).sort((a, b) => b.at - a.at)
+  },
+  async adjustments(from, to) {
+    return db.adjustments.where('createdAt').between(from, to, true, true).toArray()
   },
   async staff() {
     return (await db.staff.toArray()).map(({ id, fullName, role }) => ({ id, fullName, role }))

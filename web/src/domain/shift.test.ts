@@ -47,3 +47,18 @@ test('cash expenses come out of the drawer; non-cash ones do not', () => {
   expect(s.nonCashExpenseCentavos).toBe(500000)
   expect(s.expectedCashCentavos).toBe(85000)
 })
+
+test('voided sales drop out; refunds reduce net and the refund method', () => {
+  const s1 = sale({ items: [{ variant_id: 'a', quantity: 1, unit_price: '500.00' }], payments: [{ method: 'cash', amount: '500.00' }] })
+  const s2 = sale({ items: [{ variant_id: 'b', quantity: 2, unit_price: '300.00' }], payments: [{ method: 'cash', amount: '600.00' }] })
+  const base = { shiftId: 's', branchId: 'b', method: 'cash' as const, reason: 'x', approvedBy: 'm', staffId: 'u', createdAt: 0 }
+  const s = summarizeShift(0, [s1, s2], [], [], [
+    { ...base, id: 'v', saleId: s1.id, kind: 'void', items: [], amountCentavos: 50000 },
+    { ...base, id: 'r', saleId: s2.id, kind: 'refund', items: [{ variantId: 'b', quantity: 1, amountCentavos: 30000 }], amountCentavos: 30000 },
+  ])
+  expect(s.saleCount).toBe(1)
+  expect(s.voidCount).toBe(1)
+  expect(s.refundCentavos).toBe(30000)
+  expect(s.netCentavos).toBe(30000)
+  expect(s.expectedCashCentavos).toBe(30000)
+})

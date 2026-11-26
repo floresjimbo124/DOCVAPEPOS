@@ -83,3 +83,26 @@ test('attendance: selfie required unless the camera is unavailable', async () =>
   expect(list.map((p) => p.kind)).toEqual(['in'])
   expect((await db.ops.toArray()).some((o) => o.kind === 'attendance')).toBe(true)
 })
+
+test('void and refund restock, update the shift, and queue for the server', async () => {
+  const shift = await db.openShift(B, 'ana', 0)
+  const mk = (id: string, qty: number) => db.queueSale({
+    id, branch_id: B, shift_id: shift.id, staff_id: 'ana', age_verified: true, manual_receipt_no: null, client_created_at: new Date().toISOString(),
+    discounts: [], items: [{ variant_id: 'v-pod-straw', quantity: qty, unit_price: '550.00' }],
+    payments: [{ method: 'cash', amount: (550 * qty).toFixed(2) }],
+  })
+  await mk('s1', 1); await mk('s2', 2)
+  const stock = async () => (await db.stock.get('v-pod-straw'))!.quantity
+  expect(await stock()).toBe(7)
+
+  await expect(db.adjustSale({ saleId: 's1', kind: 'void', shiftId: shift.id, staffId: 'ana', approvedBy: 'ben', reason: ' ' })).rejects.toThrow(/reason/)
+  await db.adjustSale({ saleId: 's1', kind: 'void', shiftId: shift.id, staffId: 'ana', approvedBy: 'ben', reason: 'Wrong item' })
+  expect(await stock()).toBe(8)
+  await db.adjustSale({ saleId: 's2', kind: 'refund', shiftId: shift.id, staffId: 'ana', approvedBy: 'ben', reason: 'Defective', refundItems: { 'v-pod-straw': 1 }, method: 'cash' })
+  expect(await stock()).toBe(9)
+  await expect(db.adjustSale({ saleId: 's2', kind: 'refund', shiftId: shift.id, staffId: 'ana', approvedBy: 'ben', reason: 'x', refundItems: { 'v-pod-straw': 2 } })).rejects.toThrow(/more than/)
+
+  const s = await db.shiftSummary(shift)
+  expect([s.saleCount, s.voidCount, s.refundCentavos, s.expectedCashCentavos]).toEqual([1, 1, 55000, 55000])
+  expect((await db.ops.toArray()).filter((o) => o.kind === 'void' || o.kind === 'refund').length).toBe(2)
+})

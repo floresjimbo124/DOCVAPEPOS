@@ -45,3 +45,27 @@ test('period ranges start at local midnight', () => {
   expect(new Date(periodRange('week', now)[0]).getDate()).toBe(20)
   expect(new Date(periodRange('month', now)[0]).getDate()).toBe(1)
 })
+
+test('KPIs exclude voided sales and subtract refunds', () => {
+  const base = { shiftId: 's', branchId: 'b', method: 'cash' as const, reason: 'x', approvedBy: 'm', staffId: 'u', createdAt: 0 }
+  const k = kpis(sales, [], costOf, [
+    { ...base, id: 'v', saleId: sales[1].id, kind: 'void', items: [], amountCentavos: 50000 },
+    { ...base, id: 'r', saleId: sales[0].id, kind: 'refund', items: [{ variantId: 'juice', quantity: 1, amountCentavos: 35000 }], amountCentavos: 35000 },
+  ])
+  expect(k.transactions).toBe(1)
+  expect(k.voidCount).toBe(1)
+  expect(k.netSalesCentavos).toBe(35000)
+  expect(k.cogsCentavos).toBe(20000)
+  expect(k.itemsSold).toBe(1)
+})
+
+test('best sellers and hours are net of refunds and voids', () => {
+  const base = { shiftId: 's', branchId: 'b', method: 'cash' as const, reason: 'x', approvedBy: 'm', staffId: 'u', createdAt: new Date(2026, 10, 26, 14, 30).getTime() }
+  const adj = [
+    { ...base, id: 'v', saleId: sales[1].id, kind: 'void' as const, items: [], amountCentavos: 50000 },
+    { ...base, id: 'r', saleId: sales[0].id, kind: 'refund' as const, items: [{ variantId: 'juice', quantity: 1, amountCentavos: 35000 }], amountCentavos: 35000 },
+  ]
+  expect(topItems(sales, costOf, 10, adj).map((r) => [r.variantId, r.quantity, r.salesCentavos])).toEqual([['juice', 1, 35000]])
+  const h = byHour(sales, adj)
+  expect([h[14], h[18]]).toEqual([35000, 0])
+})

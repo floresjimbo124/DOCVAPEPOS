@@ -124,7 +124,7 @@ export function CloseShiftSheet({ shift, staff, onCancel, onClosed }: {
           <button type="button" className="icon" aria-label="Close" onClick={onCancel}>✕</button></div>
         <dl className="report">
           <div><dt>Starting cash</dt><dd>{peso(shift.startingCentavos)}</dd></div>
-          <div><dt>Cash sales</dt><dd>{peso(summary.byMethod.cash)}</dd></div>
+          <div><dt>Cash sales (after refunds)</dt><dd>{peso(summary.byMethod.cash)}</dd></div>
           <div><dt>Cash in</dt><dd>{peso(summary.cashInCentavos)}</dd></div>
           <div><dt>Cash out</dt><dd>−{peso(summary.cashOutCentavos)}</dd></div>
           <div><dt>Cash expenses</dt><dd>−{peso(summary.cashExpenseCentavos)}</dd></div>
@@ -159,6 +159,8 @@ export function ZReading({ branchName, shift, summary, staffName, onDone }: {
         <dl className="report">
           <div><dt>Sales</dt><dd>{summary.saleCount}</dd></div>
           <div><dt>Gross sales</dt><dd>{peso(summary.grossCentavos)}</dd></div>
+          {summary.voidCount > 0 && <div><dt>Voided sales ({summary.voidCount})</dt><dd>{peso(summary.voidCentavos)}</dd></div>}
+          {summary.refundCentavos > 0 && <div><dt>Refunds</dt><dd>−{peso(summary.refundCentavos)}</dd></div>}
           <div><dt>Discounts{summary.seniorPwdCount ? ` (${summary.seniorPwdCount} Senior/PWD)` : ''}</dt><dd>−{peso(summary.discountCentavos)}</dd></div>
           <div className="strong"><dt>Net sales</dt><dd>{peso(summary.netCentavos)}</dd></div>
           <div><dt>Cash</dt><dd>{peso(summary.byMethod.cash)}</dd></div>

@@ -184,6 +184,30 @@ check('other branch cannot see expenses or attendance',
   (await db.query(`select * from expenses`)).rows.length === 0 && (await db.query(`select * from attendance`)).rows.length === 0);
 await expectErr('other branch cannot set photo', () => db.query(`select set_attendance_photo($1, 'x')`, [punch.id]), 'not allowed');
 
+// ---------- Voids and refunds synced from the register ----------
+await asAdmin();
+const shift3 = (await one(`insert into shifts(branch_id,opened_by) values($1,$2) returning id`, [b, cashier])).id;
+await asUser(deviceUid);
+const twoPods = (extra = {}) => sale({ shift_id: shift3, items: [{ variant_id: v, quantity: 2, unit_price: '350' }], payments: [{ method: 'cash', amount: 700 }], ...extra });
+const sv = twoPods(); await complete(sv);
+const sr = twoPods(); await complete(sr);
+const voidP = { sale_id: sv.id, staff_id: cashier, approved_by: manager, reason: 'Wrong item' };
+await expectErr('void approved by a cashier is rejected', () => rpc('record_void', { ...voidP, approved_by: cashier }), 'owner or manager');
+const before2 = await stockOf(v);
+await rpc('record_void', voidP); await rpc('record_void', voidP);
+check('synced void restocks once', (await stockOf(v)) === before2 + 2);
+await expectErr('cannot refund a voided sale', () => rpc('record_refund', { id: randomUUID(), sale_id: sv.id, staff_id: cashier, approved_by: manager, reason: 'x', method: 'cash', amount: '350', items: [{ variant_id: v, quantity: 1, amount: '350' }] }), 'voided');
+
+const rf = { id: randomUUID(), sale_id: sr.id, shift_id: shift3, staff_id: cashier, approved_by: manager, reason: 'Defective', method: 'cash', amount: '350.00', items: [{ variant_id: v, quantity: 1, amount: '350.00' }] };
+await rpc('record_refund', rf); await rpc('record_refund', rf);
+check('refund stored once and restocks', (await stockOf(v)) === before2 + 3);
+await expectErr('cannot refund more than sold', () => rpc('record_refund', { ...rf, id: randomUUID(), items: [{ variant_id: v, quantity: 2, amount: '700' }], amount: '700' }), 'more than was sold');
+await expectErr('void after a refund is rejected', () => rpc('record_void', { ...voidP, sale_id: sr.id }), 'cannot be voided');
+await rpc('record_refund', { ...rf, id: randomUUID() });
+await asAdmin();
+check('fully refunded sale is marked refunded', (await one(`select status from sales where id=$1`, [sr.id])).status === 'refunded');
+check('void and refunds are audited', (await one(`select count(*)::int n from audit_log where action in ('void','refund')`)).n >= 3);
+
 await asAdmin();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1,6 +1,7 @@
 // Shift math: what should be in the drawer, and the Z-reading summary.
 // Pure functions over the sales and cash movements recorded during the shift.
 
+import type { Adjustment } from './adjust'
 import type { PayMethod, SalePayload } from './cart'
 
 export interface CashMovement {
@@ -36,13 +37,22 @@ export interface ShiftSummary {
   nonCashExpenseCentavos: number
   expectedCashCentavos: number
   seniorPwdCount: number
+  voidCount: number
+  voidCentavos: number
+  refundCentavos: number
   firstReceiptNo?: string
   lastReceiptNo?: string
 }
 
 const toC = (s: string | number) => Math.round(Number(s) * 100)
 
-export function summarizeShift(startingCashCentavos: number, sales: SalePayload[], moves: CashMovement[], expenses: Expense[] = []): ShiftSummary {
+/** `adjustments` = voids/refunds made during this shift. Voided sales are left out entirely;
+ *  refunds reduce net sales and the payment method they were paid back with. */
+export function summarizeShift(startingCashCentavos: number, allSales: SalePayload[], moves: CashMovement[], expenses: Expense[] = [], adjustments: Adjustment[] = []): ShiftSummary {
+  const voided = new Set(adjustments.filter((a) => a.kind === 'void').map((a) => a.saleId))
+  const sales = allSales.filter((s) => !voided.has(s.id))
+  const refunds = adjustments.filter((a) => a.kind === 'refund')
+  const refundTotal = refunds.reduce((a, r) => a + r.amountCentavos, 0)
   const byMethod: Record<PayMethod, number> = { cash: 0, gcash: 0, maya: 0 }
   let gross = 0, discount = 0, seniorPwd = 0
   const receipts: string[] = []
@@ -55,6 +65,7 @@ export function summarizeShift(startingCashCentavos: number, sales: SalePayload[
     for (const p of s.payments) byMethod[p.method] += toC(p.amount)
     if (s.manual_receipt_no) receipts.push(s.manual_receipt_no)
   }
+  for (const r of refunds) byMethod[r.method] -= r.amountCentavos
   const cashIn = moves.filter((m) => m.amountCentavos > 0).reduce((a, m) => a + m.amountCentavos, 0)
   const cashOut = -moves.filter((m) => m.amountCentavos < 0).reduce((a, m) => a + m.amountCentavos, 0)
   const cashExp = expenses.filter((e) => e.kind === 'cash').reduce((a, e) => a + e.amountCentavos, 0)
@@ -64,7 +75,7 @@ export function summarizeShift(startingCashCentavos: number, sales: SalePayload[
     saleCount: sales.length,
     grossCentavos: gross,
     discountCentavos: discount,
-    netCentavos: gross - discount,
+    netCentavos: gross - discount - refundTotal,
     byMethod,
     cashInCentavos: cashIn,
     cashOutCentavos: cashOut,
@@ -72,6 +83,9 @@ export function summarizeShift(startingCashCentavos: number, sales: SalePayload[
     nonCashExpenseCentavos: nonCashExp,
     expectedCashCentavos: startingCashCentavos + byMethod.cash + cashIn - cashOut - cashExp,
     seniorPwdCount: seniorPwd,
+    voidCount: voided.size,
+    voidCentavos: adjustments.filter((a) => a.kind === 'void').reduce((a, v) => a + v.amountCentavos, 0),
+    refundCentavos: refundTotal,
     firstReceiptNo: sorted[0],
     lastReceiptNo: sorted[sorted.length - 1],
   }

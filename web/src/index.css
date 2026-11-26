@@ -266,3 +266,9 @@ a.link { display: inline-flex; align-items: center; justify-content: center; }
   .admin-foot { margin-left: auto; }
   .admin-head .seg button { padding: 0 10px; font-size: 14px; }
 }
+
+/* ---------- Sales list ---------- */
+.sales-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sales-list button { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 52px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: none; text-align: left; font-variant-numeric: tabular-nums; }
+.tag { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--warn); white-space: nowrap; }
+.tag.bad { color: var(--danger); }

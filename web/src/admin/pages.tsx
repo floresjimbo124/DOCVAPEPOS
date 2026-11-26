@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { fmtHours, hoursWorked, type Punch } from '../domain/attendance'
 import { peso } from '../domain/cart'
+import { saleState } from '../domain/adjust'
 import { byHour, byPaymentMethod, kpis, periodRange, saleTotal, topItems, type Period } from '../domain/reports'
 import type { BackOfficeSource } from './source'
 
@@ -15,10 +16,10 @@ const METHOD = { cash: 'Cash', gcash: 'GCash', maya: 'Maya' } as const
 function useData(source: BackOfficeSource, period: Period) {
   return useLiveQuery(async () => {
     const [from, to] = periodRange(period)
-    const [sales, expenses, punches, staff, variants] = await Promise.all([
-      source.sales(from, to), source.expenses(from, to), source.punches(from, to), source.staff(), source.variants(),
+    const [sales, expenses, punches, adjustments, staff, variants] = await Promise.all([
+      source.sales(from, to), source.expenses(from, to), source.punches(from, to), source.adjustments(from, to), source.staff(), source.variants(),
     ])
-    return { sales, expenses, punches, staff, variants }
+    return { sales, expenses, punches, adjustments, staff, variants }
   }, [source, period])
 }
 
@@ -28,14 +29,15 @@ export function DashboardPage({ source, period }: { source: BackOfficeSource; pe
   const d = useData(source, period)
   if (!d) return null
   const costOf = (id: string) => d.variants.get(id)?.costCentavos ?? 0
-  const k = kpis(d.sales, d.expenses, costOf)
-  const methods = byPaymentMethod(d.sales)
-  const hours = byHour(d.sales).map((c, h) => ({ h, c })).filter((x) => x.c > 0).sort((a, b) => b.c - a.c).slice(0, 5)
-  const top = topItems(d.sales, costOf, 10)
+  const k = kpis(d.sales, d.expenses, costOf, d.adjustments)
+  const methods = byPaymentMethod(d.sales, d.adjustments)
+  const hours = byHour(d.sales, d.adjustments).map((c, h) => ({ h, c })).filter((x) => x.c > 0).sort((a, b) => b.c - a.c).slice(0, 5)
+  const top = topItems(d.sales, costOf, 10, d.adjustments)
   const cards: [string, string][] = [
     ['Net sales', peso(k.netSalesCentavos)], ['Transactions', String(k.transactions)], ['Average sale', peso(k.averageSaleCentavos)],
     ['Discounts', peso(k.discountCentavos)], ['Cost of goods', peso(k.cogsCentavos)], ['Gross profit', peso(k.grossProfitCentavos)],
     ['Expenses', peso(k.expenseCentavos)], ['Net profit', peso(k.netProfitCentavos)], ['Items sold', String(k.itemsSold)],
+    ['Refunds', peso(k.refundCentavos)], ['Voided sales', String(k.voidCount)],
   ]
   return (
     <div className="admin-body">
@@ -79,19 +81,21 @@ export function TransactionsPage({ source, period }: { source: BackOfficeSource;
       <section className="panel">
         {d.sales.length ? (
           <table className="table">
-            <thead><tr><th>Time</th><th>Receipt</th><th>Cashier</th><th>Payment</th><th className="num">Items</th><th className="num">Total</th></tr></thead>
+            <thead><tr><th>Time</th><th>Receipt</th><th>Cashier</th><th>Payment</th><th>Status</th><th className="num">Items</th><th className="num">Total</th></tr></thead>
             <tbody>{d.sales.map((s) => (
               <Fragment key={s.id}>
                 <tr className="clickable" onClick={() => setOpen(open === s.id ? undefined : s.id)}>
                   <td>{dt(s.client_created_at)}</td><td>{s.manual_receipt_no ?? '—'}</td><td>{nameOf(s.staff_id)}</td>
                   <td>{s.payments.map((p) => METHOD[p.method] + (p.reference_no ? ` (${p.reference_no})` : '')).join(' + ')}</td>
+                  <td>{saleState(s, d.adjustments)}</td>
                   <td className="num">{s.items.reduce((a, i) => a + i.quantity, 0)}</td><td className="num">{peso(saleTotal(s))}</td>
                 </tr>
                 {open === s.id && (
-                  <tr className="detail"><td colSpan={6}>
+                  <tr className="detail"><td colSpan={7}>
                     {s.items.map((i, n) => { const v = d.variants.get(i.variant_id); return <div key={n}>{i.quantity} × {v?.name} {v?.label}{i.serial_no ? ` · SN ${i.serial_no}` : ''} — ₱{i.unit_price}</div> })}
                     {s.discounts.map((x, n) => <div key={'d' + n}>Discount ({x.kind}{x.id_number ? `, ID ${x.id_number}` : ''}): −₱{x.amount}</div>)}
                     <div>Age check: {s.age_verified ? 'confirmed' : 'not confirmed'}</div>
+                    {d.adjustments.filter((a) => a.saleId === s.id).map((a) => <div key={a.id}>{a.kind === 'void' ? 'Voided' : `Refunded ${peso(a.amountCentavos)} (${a.method})`} · {a.reason} · approved by {nameOf(a.approvedBy)}</div>)}
                   </td></tr>
                 )}
               </Fragment>

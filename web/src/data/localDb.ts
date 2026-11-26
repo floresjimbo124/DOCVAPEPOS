@@ -2,7 +2,8 @@
 // so selling works with no internet. Sales wait in the outbox until synced.
 
 import Dexie, { type EntityTable } from 'dexie'
-import type { SalePayload } from '../domain/cart'
+import type { PayMethod, SalePayload } from '../domain/cart'
+import { buildRefund, buildVoid, type Adjustment } from '../domain/adjust'
 import type { Punch } from '../domain/attendance'
 import { summarizeShift, type CashMovement, type Expense, type ShiftSummary } from '../domain/shift'
 
@@ -26,7 +27,7 @@ export interface ShiftRow {
   closedAt?: number; closedBy?: string; countedCentavos?: number; expectedCentavos?: number; zNo?: number
 }
 /** Shift events waiting to be sent to the server (sales use the outbox). */
-export interface OpRow { id: string; kind: 'shift_open' | 'cash_movement' | 'shift_close' | 'expense' | 'attendance'; payload: unknown; createdAt: number; attempts: number; lastError?: string }
+export interface OpRow { id: string; kind: 'shift_open' | 'cash_movement' | 'shift_close' | 'expense' | 'attendance' | 'void' | 'refund'; payload: unknown; createdAt: number; attempts: number; lastError?: string }
 export interface SettingRow { key: string; value: unknown }
 
 export interface VariantRow { variant: Variant; product: Product; stock: number; label: string }
@@ -45,6 +46,7 @@ export class LocalDb extends Dexie {
   settings!: EntityTable<SettingRow, 'key'>
   expenses!: EntityTable<Expense, 'id'>
   punches!: EntityTable<Punch, 'id'>
+  adjustments!: EntityTable<Adjustment, 'id'>
 
   constructor(name = 'docvape_pos') {
     super(name)
@@ -68,6 +70,7 @@ export class LocalDb extends Dexie {
       expenses: 'id, shiftId, branchId, createdAt',
       punches: 'id, staffId, branchId, at',
     })
+    this.version(4).stores({ adjustments: 'id, saleId, shiftId, createdAt' })
   }
 
   // ---------- Device, staff, shifts ----------
@@ -108,7 +111,8 @@ export class LocalDb extends Dexie {
     const sales = (await this.outbox.where('shiftId').equals(shift.id).toArray()).map((r) => r.payload)
     const moves = await this.cashMoves.where('shiftId').equals(shift.id).toArray()
     const expenses = await this.expenses.where('shiftId').equals(shift.id).toArray()
-    return summarizeShift(shift.startingCentavos, sales, moves, expenses)
+    const adjustments = await this.adjustments.where('shiftId').equals(shift.id).toArray()
+    return summarizeShift(shift.startingCentavos, sales, moves, expenses, adjustments)
   }
 
   /** Cash expenses are paid from the drawer of the open shift; non-cash ones are just recorded. */
@@ -137,12 +141,46 @@ export class LocalDb extends Dexie {
     })
   }
 
+  /**
+   * Void (whole sale, current shift) or refund (chosen items). The approver must already be
+   * verified with an owner/manager PIN. Restocks the items and queues the change for the server.
+   */
+  async adjustSale(a: {
+    saleId: string; kind: Adjustment['kind']; shiftId: string; staffId: string; approvedBy: string; reason: string
+    refundItems?: Record<string, number>; method?: PayMethod
+  }): Promise<Adjustment> {
+    if (!a.reason.trim()) throw new Error('Enter a reason')
+    return this.transaction('rw', [this.outbox, this.adjustments, this.stock, this.ops], async () => {
+      const sale = (await this.outbox.get(a.saleId))?.payload
+      if (!sale) throw new Error('Sale not found on this device')
+      const prior = await this.adjustments.where('saleId').equals(a.saleId).toArray()
+      const built = a.kind === 'void' ? buildVoid(sale, prior, a.shiftId) : buildRefund(sale, a.refundItems ?? {}, prior)
+      const adj: Adjustment = {
+        id: crypto.randomUUID(), saleId: sale.id, shiftId: a.shiftId, branchId: sale.branch_id, kind: a.kind,
+        items: built.items, amountCentavos: built.amountCentavos, method: a.method ?? sale.payments[0]?.method ?? 'cash',
+        reason: a.reason.trim(), approvedBy: a.approvedBy, staffId: a.staffId, createdAt: Date.now(),
+      }
+      await this.adjustments.add(adj)
+      for (const i of adj.items) {
+        const cur = await this.stock.get(i.variantId)
+        await this.stock.put({ variantId: i.variantId, quantity: (cur?.quantity ?? 0) + i.quantity })
+      }
+      await this.queueOp(a.kind, {
+        id: adj.id, sale_id: adj.saleId, shift_id: adj.shiftId, branch_id: adj.branchId, staff_id: adj.staffId,
+        approved_by: adj.approvedBy, reason: adj.reason, method: adj.method, amount: (adj.amountCentavos / 100).toFixed(2),
+        items: adj.items.map((i) => ({ variant_id: i.variantId, quantity: i.quantity, amount: (i.amountCentavos / 100).toFixed(2) })),
+        created_at: new Date(adj.createdAt).toISOString(),
+      })
+      return adj
+    })
+  }
+
   punchesBetween = (branchId: string, from: number, to: number) =>
     this.punches.where('at').between(from, to, true, true).filter((p) => p.branchId === branchId).toArray()
 
   /** Closes the shift with the counted cash; assigns the next Z-reading number for this device. */
   closeShift(shiftId: string, staffId: string, countedCentavos: number): Promise<{ shift: ShiftRow; summary: ShiftSummary }> {
-    return this.transaction('rw', [this.shifts, this.outbox, this.cashMoves, this.expenses, this.ops, this.settings], async () => {
+    return this.transaction('rw', [this.shifts, this.outbox, this.cashMoves, this.expenses, this.adjustments, this.ops, this.settings], async () => {
       const shift = await this.shifts.get(shiftId)
       if (!shift || shift.closedAt != null) throw new Error('Shift is not open')
       const summary = await this.shiftSummary(shift)
