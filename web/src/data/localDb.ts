@@ -3,7 +3,8 @@
 
 import Dexie, { type EntityTable } from 'dexie'
 import type { SalePayload } from '../domain/cart'
-import { summarizeShift, type CashMovement, type ShiftSummary } from '../domain/shift'
+import type { Punch } from '../domain/attendance'
+import { summarizeShift, type CashMovement, type Expense, type ShiftSummary } from '../domain/shift'
 
 export interface Category { id: string; name: string; sortOrder: number }
 export interface Product { id: string; categoryId: string | null; name: string; brand?: string; isDevice: boolean; isActive: boolean }
@@ -25,7 +26,7 @@ export interface ShiftRow {
   closedAt?: number; closedBy?: string; countedCentavos?: number; expectedCentavos?: number; zNo?: number
 }
 /** Shift events waiting to be sent to the server (sales use the outbox). */
-export interface OpRow { id: string; kind: 'shift_open' | 'cash_movement' | 'shift_close'; payload: unknown; createdAt: number; attempts: number; lastError?: string }
+export interface OpRow { id: string; kind: 'shift_open' | 'cash_movement' | 'shift_close' | 'expense' | 'attendance'; payload: unknown; createdAt: number; attempts: number; lastError?: string }
 export interface SettingRow { key: string; value: unknown }
 
 export interface VariantRow { variant: Variant; product: Product; stock: number; label: string }
@@ -42,6 +43,8 @@ export class LocalDb extends Dexie {
   cashMoves!: EntityTable<CashMovement, 'id'>
   ops!: EntityTable<OpRow, 'id'>
   settings!: EntityTable<SettingRow, 'key'>
+  expenses!: EntityTable<Expense, 'id'>
+  punches!: EntityTable<Punch, 'id'>
 
   constructor(name = 'docvape_pos') {
     super(name)
@@ -61,6 +64,10 @@ export class LocalDb extends Dexie {
       ops: 'id, createdAt',
       settings: 'key',
     }).upgrade((tx) => tx.table('outbox').toCollection().modify((r: OutboxRow) => { r.shiftId = r.payload.shift_id }))
+    this.version(3).stores({
+      expenses: 'id, shiftId, branchId, createdAt',
+      punches: 'id, staffId, branchId, at',
+    })
   }
 
   // ---------- Device, staff, shifts ----------
@@ -100,12 +107,42 @@ export class LocalDb extends Dexie {
   async shiftSummary(shift: ShiftRow): Promise<ShiftSummary> {
     const sales = (await this.outbox.where('shiftId').equals(shift.id).toArray()).map((r) => r.payload)
     const moves = await this.cashMoves.where('shiftId').equals(shift.id).toArray()
-    return summarizeShift(shift.startingCentavos, sales, moves)
+    const expenses = await this.expenses.where('shiftId').equals(shift.id).toArray()
+    return summarizeShift(shift.startingCentavos, sales, moves, expenses)
   }
+
+  /** Cash expenses are paid from the drawer of the open shift; non-cash ones are just recorded. */
+  async addExpense(e: { branchId: string; shiftId?: string; staffId: string; name: string; amountCentavos: number; kind: Expense['kind'] }) {
+    if (!e.name.trim()) throw new Error('Enter what the expense is for')
+    if (!(e.amountCentavos > 0)) throw new Error('Enter an amount')
+    if (e.kind === 'cash' && !e.shiftId) throw new Error('Open a shift to pay a cash expense from the drawer')
+    return this.transaction('rw', this.expenses, this.ops, async () => {
+      const x: Expense = { ...e, id: crypto.randomUUID(), name: e.name.trim(), createdAt: Date.now() }
+      await this.expenses.add(x)
+      await this.queueOp('expense', { id: x.id, branch_id: x.branchId, shift_id: x.shiftId ?? null, staff_id: x.staffId,
+        name: x.name, amount: (x.amountCentavos / 100).toFixed(2), kind: x.kind, created_at: new Date(x.createdAt).toISOString() })
+      return x
+    })
+  }
+
+  /** Records a clock-in/out. The selfie stays on the device until it is uploaded by sync. */
+  async recordPunch(p: Omit<Punch, 'id' | 'at'>) {
+    if (!p.photo && !p.noPhotoReason) throw new Error('Take a selfie to clock in or out')
+    return this.transaction('rw', this.punches, this.ops, async () => {
+      const x: Punch = { ...p, id: crypto.randomUUID(), at: Date.now() }
+      await this.punches.add(x)
+      await this.queueOp('attendance', { id: x.id, staff_id: x.staffId, branch_id: x.branchId, kind: x.kind,
+        at: new Date(x.at).toISOString(), has_photo: !!x.photo, no_photo_reason: x.noPhotoReason ?? null })
+      return x
+    })
+  }
+
+  punchesBetween = (branchId: string, from: number, to: number) =>
+    this.punches.where('at').between(from, to, true, true).filter((p) => p.branchId === branchId).toArray()
 
   /** Closes the shift with the counted cash; assigns the next Z-reading number for this device. */
   closeShift(shiftId: string, staffId: string, countedCentavos: number): Promise<{ shift: ShiftRow; summary: ShiftSummary }> {
-    return this.transaction('rw', [this.shifts, this.outbox, this.cashMoves, this.ops, this.settings], async () => {
+    return this.transaction('rw', [this.shifts, this.outbox, this.cashMoves, this.expenses, this.ops, this.settings], async () => {
       const shift = await this.shifts.get(shiftId)
       if (!shift || shift.closedAt != null) throw new Error('Shift is not open')
       const summary = await this.shiftSummary(shift)

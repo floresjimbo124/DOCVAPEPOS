@@ -62,3 +62,24 @@ test('open shift, sell, cash in/out, close with Z-reading', async () => {
   expect((await db.ops.toArray()).map((o) => o.kind).sort()).toEqual(
     ['cash_movement', 'shift_close', 'shift_close', 'shift_open', 'shift_open'])
 })
+
+test('expenses: cash comes out of the drawer, non-cash is only recorded', async () => {
+  await expect(db.addExpense({ branchId: B, staffId: 'ana', name: 'Water', amountCentavos: 5000, kind: 'cash' })).rejects.toThrow(/Open a shift/)
+  const shift = await db.openShift(B, 'ana', 100000)
+  await db.addExpense({ branchId: B, shiftId: shift.id, staffId: 'ana', name: 'Water', amountCentavos: 5000, kind: 'cash' })
+  await db.addExpense({ branchId: B, shiftId: shift.id, staffId: 'ana', name: 'Electric bill', amountCentavos: 350000, kind: 'non_cash' })
+  await expect(db.addExpense({ branchId: B, shiftId: shift.id, staffId: 'ana', name: ' ', amountCentavos: 100, kind: 'cash' })).rejects.toThrow(/what/)
+  await expect(db.addExpense({ branchId: B, shiftId: shift.id, staffId: 'ana', name: 'x', amountCentavos: 0, kind: 'cash' })).rejects.toThrow(/amount/)
+  const s = await db.shiftSummary(shift)
+  expect(s.expectedCashCentavos).toBe(95000)
+  expect(s.nonCashExpenseCentavos).toBe(350000)
+  expect((await db.ops.toArray()).filter((o) => o.kind === 'expense').length).toBe(2)
+})
+
+test('attendance: selfie required unless the camera is unavailable', async () => {
+  await expect(db.recordPunch({ staffId: 'ana', branchId: B, kind: 'in' })).rejects.toThrow(/selfie/)
+  await db.recordPunch({ staffId: 'ana', branchId: B, kind: 'in', noPhotoReason: 'No camera' })
+  const list = await db.punchesBetween(B, 0, Date.now() + 1000)
+  expect(list.map((p) => p.kind)).toEqual(['in'])
+  expect((await db.ops.toArray()).some((o) => o.kind === 'attendance')).toBe(true)
+})

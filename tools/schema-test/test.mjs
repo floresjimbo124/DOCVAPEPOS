@@ -165,5 +165,25 @@ await asUser(device2Uid);
 await expectErr('other branch device cannot open shift here', () => rpc('open_shift', { id: randomUUID(), branch_id: b, opened_by: manager }), 'not allowed');
 
 await asAdmin();
+// ---------- Expenses + attendance ----------
+await asUser(deviceUid);
+const ex = { id: randomUUID(), branch_id: b, shift_id: shift2, staff_id: cashier, name: 'Water', amount: '50.00', kind: 'cash' };
+await rpc('add_expense', ex); await rpc('add_expense', ex);
+await rpc('add_expense', { id: randomUUID(), branch_id: b, staff_id: manager, name: 'Electric bill', amount: '3500', kind: 'non_cash' });
+await expectErr('cash expense needs a shift', () => rpc('add_expense', { ...ex, id: randomUUID(), shift_id: null }));
+await expectErr('expense needs a name', () => rpc('add_expense', { ...ex, id: randomUUID(), name: '  ' }));
+await expectErr('expense amount must be positive', () => rpc('add_expense', { ...ex, id: randomUUID(), amount: '0' }));
+check('expenses stored once each', (await db.query(`select * from expenses`)).rows.length === 2);
+
+const punch = { id: randomUUID(), staff_id: cashier, branch_id: b, kind: 'in', at: new Date().toISOString() };
+await rpc('record_attendance', punch); await rpc('record_attendance', punch);
+await db.query(`select set_attendance_photo($1, $2)`, [punch.id, `${b}/${punch.id}.jpg`]);
+check('attendance stored once with photo path', (await one(`select photo_path from attendance where id=$1`, [punch.id]))?.photo_path?.endsWith('.jpg'));
+await asUser(device2Uid);
+check('other branch cannot see expenses or attendance',
+  (await db.query(`select * from expenses`)).rows.length === 0 && (await db.query(`select * from attendance`)).rows.length === 0);
+await expectErr('other branch cannot set photo', () => db.query(`select set_attendance_photo($1, 'x')`, [punch.id]), 'not allowed');
+
+await asAdmin();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

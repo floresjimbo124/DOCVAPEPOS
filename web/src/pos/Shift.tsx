@@ -38,40 +38,60 @@ export function OpenShift({ branchId, branchName, staff, onOpened, onLock }: {
   )
 }
 
-// ---------- Cash in / out ----------
+// ---------- Cash in / out and expenses ----------
+type Mode = 'in' | 'out' | 'expense'
 export function CashMoveSheet({ shift, staff, onClose }: { shift: ShiftRow; staff: StaffRow; onClose: () => void }) {
-  const [dir, setDir] = useState<'in' | 'out'>('out')
+  const [mode, setMode] = useState<Mode>('expense')
+  const [kind, setKind] = useState<'cash' | 'non_cash'>('cash')
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
   const [error, setError] = useState<string>()
-  const moves = useLiveQuery(() => db.cashMoves.where('shiftId').equals(shift.id).reverse().sortBy('createdAt'), [shift.id]) ?? []
+  const moves = useLiveQuery(() => db.cashMoves.where('shiftId').equals(shift.id).toArray(), [shift.id]) ?? []
+  const expenses = useLiveQuery(() => db.expenses.where('shiftId').equals(shift.id).toArray(), [shift.id]) ?? []
+  const rows = [
+    ...moves.map((m) => ({ id: m.id, at: m.createdAt, label: m.reason, tag: m.amountCentavos > 0 ? 'Cash in' : 'Cash out', amount: m.amountCentavos })),
+    ...expenses.map((e) => ({ id: e.id, at: e.createdAt, label: e.name, tag: e.kind === 'cash' ? 'Expense · cash' : 'Expense · non-cash', amount: -e.amountCentavos })),
+  ].sort((x, y) => y.at - x.at)
 
   async function save() {
-    const c = toCentavos(amount)
+    const c = toCentavos(amount) ?? 0
     try {
-      await db.addCashMove(shift.id, staff.id, (c ?? 0) * (dir === 'out' ? -1 : 1), reason)
+      if (mode === 'expense') {
+        await db.addExpense({ branchId: shift.branchId, shiftId: shift.id, staffId: staff.id, name: reason, amountCentavos: c, kind })
+      } else {
+        await db.addCashMove(shift.id, staff.id, c * (mode === 'out' ? -1 : 1), reason)
+      }
       setAmount(''); setReason(''); setError(undefined)
     } catch (e) { setError((e as Error).message) }
   }
 
+  const placeholder = mode === 'in' ? 'e.g. added change fund' : mode === 'out' ? 'e.g. owner took cash' : 'e.g. water, supplies, electric bill'
   return (
     <div className="overlay" onClick={onClose}>
       <form className="drawer right" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); void save() }}>
-        <div className="drawer-head"><h2>Cash in / out</h2><button type="button" className="icon" aria-label="Close" onClick={onClose}>✕</button></div>
+        <div className="drawer-head"><h2>Cash &amp; expenses</h2><button type="button" className="icon" aria-label="Close" onClick={onClose}>✕</button></div>
         <div className="seg">
-          <button type="button" className={dir === 'out' ? 'on' : ''} onClick={() => setDir('out')}>Cash out</button>
-          <button type="button" className={dir === 'in' ? 'on' : ''} onClick={() => setDir('in')}>Cash in</button>
+          <button type="button" className={mode === 'expense' ? 'on' : ''} onClick={() => setMode('expense')}>Expense</button>
+          <button type="button" className={mode === 'in' ? 'on' : ''} onClick={() => setMode('in')}>Cash in</button>
+          <button type="button" className={mode === 'out' ? 'on' : ''} onClick={() => setMode('out')}>Cash out</button>
         </div>
+        {mode === 'expense' && (
+          <div className="seg">
+            <button type="button" className={kind === 'cash' ? 'on' : ''} onClick={() => setKind('cash')}>Paid from drawer</button>
+            <button type="button" className={kind === 'non_cash' ? 'on' : ''} onClick={() => setKind('non_cash')}>Paid another way</button>
+          </div>
+        )}
         <label className="field"><span>Amount</span><input inputMode="decimal" placeholder="₱0.00" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
-        <label className="field"><span>Reason</span><input placeholder={dir === 'out' ? 'e.g. bought supplies' : 'e.g. added change fund'} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+        <label className="field"><span>{mode === 'expense' ? 'What for' : 'Reason'}</span><input placeholder={placeholder} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+        {mode === 'expense' && kind === 'non_cash' && <p className="muted">Bank, GCash or owner-paid. Counts in expenses and profit, not in the drawer.</p>}
         {error && <p className="error" role="alert">{error}</p>}
         <button className="btn primary xl" type="submit">Save</button>
-        {moves.length > 0 && (
+        {rows.length > 0 && (
           <section className="step">
             <h3>This shift</h3>
             <ul className="plain">
-              {moves.map((m) => (
-                <li key={m.id}><span>{m.reason}<small> · {fmtTime(m.createdAt)}</small></span><b>{m.amountCentavos > 0 ? '+' : '−'}{peso(Math.abs(m.amountCentavos))}</b></li>
+              {rows.map((r) => (
+                <li key={r.id}><span>{r.label}<small> · {r.tag} · {fmtTime(r.at)}</small></span><b>{r.amount > 0 ? '+' : '−'}{peso(Math.abs(r.amount))}</b></li>
               ))}
             </ul>
           </section>
@@ -107,6 +127,7 @@ export function CloseShiftSheet({ shift, staff, onCancel, onClosed }: {
           <div><dt>Cash sales</dt><dd>{peso(summary.byMethod.cash)}</dd></div>
           <div><dt>Cash in</dt><dd>{peso(summary.cashInCentavos)}</dd></div>
           <div><dt>Cash out</dt><dd>−{peso(summary.cashOutCentavos)}</dd></div>
+          <div><dt>Cash expenses</dt><dd>−{peso(summary.cashExpenseCentavos)}</dd></div>
           <div className="strong"><dt>Expected in drawer</dt><dd>{peso(summary.expectedCashCentavos)}</dd></div>
         </dl>
         <label className="field"><span>Counted cash in drawer</span>
@@ -143,6 +164,7 @@ export function ZReading({ branchName, shift, summary, staffName, onDone }: {
           <div><dt>Cash</dt><dd>{peso(summary.byMethod.cash)}</dd></div>
           <div><dt>GCash</dt><dd>{peso(summary.byMethod.gcash)}</dd></div>
           <div><dt>Maya</dt><dd>{peso(summary.byMethod.maya)}</dd></div>
+          <div><dt>Expenses (cash / non-cash)</dt><dd>{peso(summary.cashExpenseCentavos)} / {peso(summary.nonCashExpenseCentavos)}</dd></div>
           <div><dt>Receipts</dt><dd>{summary.firstReceiptNo ? `${summary.firstReceiptNo} – ${summary.lastReceiptNo}` : '—'}</dd></div>
           <div><dt>Expected cash</dt><dd>{peso(shift.expectedCentavos ?? 0)}</dd></div>
           <div><dt>Counted cash</dt><dd>{peso(shift.countedCentavos ?? 0)}</dd></div>

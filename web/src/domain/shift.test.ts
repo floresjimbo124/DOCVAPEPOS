@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import type { SalePayload } from './cart'
-import { overShort, summarizeShift, type CashMovement } from './shift'
+import { overShort, summarizeShift, type CashMovement, type Expense } from './shift'
 
 const sale = (over: Partial<SalePayload>): SalePayload => ({
   id: crypto.randomUUID(), branch_id: 'b', shift_id: 's', staff_id: 'u', age_verified: true, manual_receipt_no: null,
@@ -37,4 +37,13 @@ test('empty shift expects only the starting cash', () => {
   const s = summarizeShift(100000, [], [])
   expect(s.expectedCashCentavos).toBe(100000)
   expect(s.firstReceiptNo).toBeUndefined()
+})
+
+test('cash expenses come out of the drawer; non-cash ones do not', () => {
+  const exp = (kind: Expense['kind'], amountCentavos: number): Expense =>
+    ({ id: crypto.randomUUID(), branchId: 'b', shiftId: 's', name: 'x', amountCentavos, kind, staffId: 'u', createdAt: 0 })
+  const s = summarizeShift(100000, [], [], [exp('cash', 15000), exp('non_cash', 500000)])
+  expect(s.cashExpenseCentavos).toBe(15000)
+  expect(s.nonCashExpenseCentavos).toBe(500000)
+  expect(s.expectedCashCentavos).toBe(85000)
 })

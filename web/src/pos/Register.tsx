@@ -137,7 +137,7 @@ export function Register({ device, staff, shift, onLock, onShiftClosed }: Props)
         <div className="status">
           <span className={online ? 'pill ok' : 'pill off'}><i />{online ? 'Online' : 'Offline – still selling'}</span>
           {pending > 0 && <span className="pill warn">{pending} to sync</span>}
-          <button className="topbtn" onClick={() => setPanel('cash')}>Cash in/out</button>
+          <button className="topbtn" onClick={() => setPanel('cash')}>Cash &amp; expenses</button>
           <button className="topbtn" onClick={() => setPanel('close')} disabled={cart.lines.length > 0}
             title={cart.lines.length ? 'Finish or clear the current sale first' : undefined}>Close shift</button>
           <button className="topbtn" onClick={onLock} disabled={cart.lines.length > 0}

@@ -1,14 +1,14 @@
 // Cashier PIN login. Works offline (checks cached PIN hashes on the device).
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { verifyPin } from '../data/auth'
 import { db, type StaffRow } from '../data/localDb'
 
-interface Props { branchName: string; onLogin: (s: StaffRow) => void }
+interface Props { branchName: string; onLogin: (s: StaffRow) => void; title?: string; submitLabel?: string; footer?: ReactNode }
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'clear', '0', 'back'] as const
 
-export function PinLogin({ branchName, onLogin }: Props) {
+export function PinLogin({ branchName, onLogin, title = 'Enter your PIN', submitLabel = 'Log in', footer }: Props) {
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string>()
   const [checking, setChecking] = useState(false)
@@ -45,7 +45,7 @@ export function PinLogin({ branchName, onLogin }: Props) {
       <div className="card login">
         <span className="logo big"><img src="/logo.png" alt="DOCVAPE – Drip of Clouds" /></span>
         <p className="muted">{branchName}</p>
-        <h2>Enter your PIN</h2>
+        <h2>{title}</h2>
         <div className="dots" aria-label={`${pin.length} digits entered`}>
           {Array.from({ length: Math.max(4, pin.length) }, (_, i) => <i key={i} className={i < pin.length ? 'on' : ''} />)}
         </div>
@@ -59,8 +59,9 @@ export function PinLogin({ branchName, onLogin }: Props) {
           ))}
         </div>
         <button className="btn primary xl" disabled={pin.length < 4 || checking} onClick={() => void submit()}>
-          {checking ? 'Checking…' : 'Log in'}
+          {checking ? 'Checking…' : submitLabel}
         </button>
+        {footer}
       </div>
     </div>
   )

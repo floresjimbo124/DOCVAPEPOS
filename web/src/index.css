@@ -210,3 +210,9 @@ small { color: var(--muted); }
 
 .actions { display: flex; gap: 8px; }
 .actions > * { flex: 1; }
+
+/* ---------- Attendance ---------- */
+.selfie { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; background: #000; transform: scaleX(-1); }
+img.selfie { transform: none; }
+.today { width: 100%; text-align: left; }
+.today .section { margin-top: 8px; }
