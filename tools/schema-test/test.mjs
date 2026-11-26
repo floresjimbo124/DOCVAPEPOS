@@ -208,6 +208,34 @@ await asAdmin();
 check('fully refunded sale is marked refunded', (await one(`select status from sales where id=$1`, [sr.id])).status === 'refunded');
 check('void and refunds are audited', (await one(`select count(*)::int n from audit_log where action in ('void','refund')`)).n >= 3);
 
+// ---------- Device setup ----------
+const newDevice = randomUUID(), stranger = randomUUID(), mgrUid = randomUUID();
+await asAdmin();
+await db.query(`update staff set auth_user_id=$1 where id=$2`, [mgrUid, manager]);
+await asUser(stranger);
+check('unapproved account sees no catalogue or customers',
+  (await db.query(`select * from products`)).rows.length === 0 && (await db.query(`select * from customers`)).rows.length === 0);
+await expectErr('random account cannot approve a device', () => db.query(`select register_device($1,$2,'x')`, [stranger, b]), 'only the owner');
+await asUser(mgrUid);
+await expectErr('manager cannot approve a device for another branch', () => db.query(`select register_device($1,$2,'x')`, [newDevice, b2]), 'only the owner');
+await expectErr('staff login cannot be made a device', () => db.query(`select register_device($1,$2,'x')`, [ownerUid, b]), 'not a device');
+await expectErr('device needs a name', () => db.query(`select register_device($1,$2,'  ')`, [newDevice, b]), 'name this device');
+await db.query(`select register_device($1,$2,'Counter tablet')`, [newDevice, b]);
+check('manager profile shows PIN is set', (await one(`select * from my_profile()`)).pin_set === true);
+await asUser(newDevice);
+const info = await one(`select * from device_info()`);
+check('approved device knows its branch', info?.branch_id === b && info?.label === 'Counter tablet');
+check('approved device reads the catalogue', (await db.query(`select * from products`)).rows.length >= 2);
+check('approved device gets its staff for offline login', (await db.query(`select * from device_staff()`)).rows.length >= 3);
+await asUser(ownerUid);
+await db.query(`select register_device($1,$2,'Moved tablet')`, [newDevice, b2]);
+await asUser(newDevice);
+check('owner can move a device to another branch', (await one(`select * from device_info()`))?.branch_id === b2);
+await asAdmin();
+await db.query(`update pos_devices set is_active=false where auth_user_id=$1`, [newDevice]);
+await asUser(newDevice);
+check('switched-off device loses access', !(await one(`select * from device_info()`)) && (await db.query(`select * from products`)).rows.length === 0);
+
 await asAdmin();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

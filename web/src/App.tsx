@@ -1,30 +1,44 @@
-// App flow: PIN login -> open shift (if none) -> register.
+// App flow: (device setup, first time only) -> PIN login -> open shift (if none) -> register.
 // Lock returns to PIN login; closing the shift shows the Z-reading, then PIN login.
+//
+// A device is either "live" (approved for a real branch; syncs with the server) or "demo"
+// (sample items on this device only, for trying the app).
 
+import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useState } from 'react'
 import { DEMO_BRANCH, seedDemoIfEmpty, seedDemoStaffIfEmpty } from './data/demoSeed'
 import { db, type DeviceSettings, type ShiftRow, type StaffRow } from './data/localDb'
+import { isServerConfigured } from './data/supabase'
+import { useSync } from './data/useSync'
 import type { ShiftSummary } from './domain/shift'
 import { Attendance } from './pos/Attendance'
+import { DeviceSetup } from './pos/DeviceSetup'
 import { PinLogin } from './pos/PinLogin'
 import { Register } from './pos/Register'
 import { OpenShift, ZReading } from './pos/Shift'
 
+async function startDemo() {
+  await seedDemoIfEmpty(db)
+  await seedDemoStaffIfEmpty(db)
+  if (!(await db.getSetting('device'))) await db.setSetting('device', DEMO_BRANCH)
+}
+
 export default function App() {
-  const [device, setDevice] = useState<DeviceSettings>()
+  // { value } so "still loading" (undefined) differs from "not set up yet" ({ value: undefined }).
+  const saved = useLiveQuery(async () => ({ value: await db.getSetting<DeviceSettings>('device') }), [])
+  const device = saved?.value
+  const [setup, setSetup] = useState(false)
   const [staff, setStaff] = useState<StaffRow>()
   const [shift, setShift] = useState<ShiftRow | null>() // undefined = loading, null = none open
   const [closed, setClosed] = useState<{ shift: ShiftRow; summary: ShiftSummary; by: string }>()
   const [clocking, setClocking] = useState(false)
 
+  useSync(!!device?.live)
+
+  // Without a server there is nothing to set up: go straight to demo data.
   useEffect(() => {
-    void (async () => {
-      await seedDemoIfEmpty(db)
-      await seedDemoStaffIfEmpty(db)
-      // Placeholder until device sign-in exists: every device is the demo branch.
-      setDevice((await db.getSetting<DeviceSettings>('device')) ?? DEMO_BRANCH)
-    })()
-  }, [])
+    if (saved && !saved.value && !isServerConfigured()) void startDemo()
+  }, [saved])
 
   // After login, find this branch's open shift (it survives logouts and app restarts).
   useEffect(() => {
@@ -34,16 +48,22 @@ export default function App() {
 
   const lock = () => { setStaff(undefined); setShift(undefined) }
 
-  if (!device) return <p className="center-screen">Loading…</p>
+  if (!saved) return <p className="center-screen">Loading…</p>
+  if (!device || setup) {
+    if (!isServerConfigured()) return <p className="center-screen">Loading…</p>
+    return <DeviceSetup current={device} onDone={() => { setSetup(false); lock() }}
+      onDemo={device ? undefined : () => void startDemo()} onCancel={device ? () => setSetup(false) : undefined} />
+  }
   if (closed) {
     return <ZReading branchName={device.branchName} shift={closed.shift} summary={closed.summary} staffName={closed.by}
       onDone={() => { setClosed(undefined); lock() }} />
   }
   if (clocking) return <Attendance branchId={device.branchId} branchName={device.branchName} onDone={() => setClocking(false)} />
   if (!staff) {
-    return <PinLogin branchName={device.branchName} onLogin={setStaff}
+    return <PinLogin branchName={device.live ? device.branchName : `${device.branchName} · demo`} onLogin={setStaff}
       footer={<>
         <button className="btn" onClick={() => setClocking(true)}>Clock in / out</button>
+        {isServerConfigured() && !device.live && <button className="link" onClick={() => setSetup(true)}>Set up this device for a branch</button>}
         <a className="link" href="/admin">Owner login</a>
       </>} />
   }

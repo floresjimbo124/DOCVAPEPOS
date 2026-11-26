@@ -16,12 +16,14 @@ export interface Variant {
 /** Stock at THIS device's branch (refreshed on sync, decremented locally on sale). */
 export interface StockRow { variantId: string; quantity: number }
 export interface Favorite { variantId: string; sortOrder: number }
-export interface OutboxRow { saleId: string; shiftId: string; payload: SalePayload; createdAt: number; attempts: number; lastError?: string }
+/** Sales stay here after syncing (the register reads them for shift totals); syncedAt marks them sent. */
+export interface OutboxRow { saleId: string; shiftId: string; payload: SalePayload; createdAt: number; attempts: number; lastError?: string; syncedAt?: number }
 
 export type Role = 'owner' | 'manager' | 'cashier'
 /** Staff allowed at this branch, cached for offline PIN login (PIN stored only as a bcrypt hash). */
 export interface StaffRow { id: string; fullName: string; role: Role; pinHash: string; isActive: boolean }
-export interface DeviceSettings { branchId: string; branchName: string; label: string }
+/** live = approved for a real branch on the server (syncs); otherwise demo data on this device only. */
+export interface DeviceSettings { branchId: string; branchName: string; label: string; live?: boolean }
 export interface ShiftRow {
   id: string; branchId: string; openedBy: string; openedAt: number; startingCentavos: number
   closedAt?: number; closedBy?: string; countedCentavos?: number; expectedCentavos?: number; zNo?: number
@@ -195,7 +197,13 @@ export class LocalDb extends Dexie {
     })
   }
 
-  pendingCount = async () => (await this.outbox.count()) + (await this.ops.count())
+  unsyncedSales = () => this.outbox.filter((r) => !r.syncedAt).toArray()
+  pendingCount = async () => (await this.outbox.filter((r) => !r.syncedAt).count()) + (await this.ops.count())
+
+  /** Erases everything on this device (used when switching from demo data to a real branch). */
+  eraseAll() {
+    return this.transaction('rw', this.tables, () => Promise.all(this.tables.map((t) => t.clear())))
+  }
 
   private async rows(variants: Variant[]): Promise<VariantRow[]> {
     const active = variants.filter((v) => v.isActive)

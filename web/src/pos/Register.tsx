@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import CountUp from '../components/reactbits/CountUp'
 import { db, type DeviceSettings, type Product, type ShiftRow, type StaffRow, type VariantRow } from '../data/localDb'
 import { addToCart, discountAmount, emptyCart, peso, setQuantity, subtotal, total, type CartState } from '../domain/cart'
+import type { SyncStatus } from '../data/sync'
 import { useTheme } from '../theme'
 import type { ShiftSummary } from '../domain/shift'
 import { Checkout } from './Checkout'
@@ -60,6 +61,8 @@ export function Register({ device, staff, shift, onLock, onShiftClosed }: Props)
   const favorites = useLiveQuery(() => db.favoriteRows(), []) ?? []
   const results = useLiveQuery(() => db.search(query), [query]) ?? []
   const pending = useLiveQuery(() => db.pendingCount(), []) ?? 0
+  const sync = useLiveQuery(() => db.getSetting<SyncStatus>('syncStatus'), [])
+  const syncProblem = device.live && online && pending > 0 && sync?.error
   const itemCount = cart.lines.reduce((s, l) => s + l.quantity, 0)
 
   const add = (r: VariantRow) => {
@@ -137,7 +140,12 @@ export function Register({ device, staff, shift, onLock, onShiftClosed }: Props)
         </div>
         <div className="status">
           <span className={online ? 'pill ok' : 'pill off'}><i />{online ? 'Online' : 'Offline – still selling'}</span>
-          {pending > 0 && <span className="pill warn">{pending} to sync</span>}
+          {!device.live && <span className="pill">Demo</span>}
+          {device.live && pending > 0 && (
+            <span className={syncProblem ? 'pill off' : 'pill warn'} title={syncProblem ? `Not sent: ${sync.error}` : 'Waiting to be sent to the server'}>
+              {syncProblem ? `${pending} not sent – ${sync.error}` : `${pending} to sync`}
+            </span>
+          )}
           <button className="topbtn" onClick={() => setPanel('sales')}>Sales</button>
           <button className="topbtn" onClick={() => setPanel('cash')}>Cash &amp; expenses</button>
           <button className="topbtn" onClick={() => setPanel('close')} disabled={cart.lines.length > 0}
