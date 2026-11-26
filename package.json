@@ -1,0 +1,11 @@
+{
+  "name": "docvape-pos",
+  "private": true,
+  "description": "Shortcuts so commands work from the project root.",
+  "scripts": {
+    "dev": "npm --prefix web run dev",
+    "dev:lan": "npm --prefix web run dev -- --host",
+    "build": "npm --prefix web run build",
+    "test": "npm --prefix web test && npm --prefix tools/schema-test test"
+  }
+}
