@@ -146,3 +146,9 @@ export function peso(centavos: number): string {
   const [whole, frac] = (Math.abs(centavos) / 100).toFixed(2).split('.')
   return `${centavos < 0 ? '-' : ''}₱${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${frac}`
 }
+
+/** Exact, then the next ₱100 / ₱500 / ₱1000 above the total. */
+export function quickCash(totalCentavos: number): number[] {
+  const up = (step: number) => Math.ceil(totalCentavos / step) * step
+  return [...new Set([totalCentavos, up(10000), up(50000), up(100000)])].filter((v) => v >= totalCentavos).slice(0, 4)
+}

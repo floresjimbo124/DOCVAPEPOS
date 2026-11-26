@@ -42,3 +42,10 @@ test('queued sale goes to outbox and deducts local stock', async () => {
   await seedDemoIfEmpty(db)
   expect(await db.categories.count()).toBe(3)
 })
+
+test('seeding twice at the same time is safe', async () => {
+  const fresh = new LocalDb(`test-${crypto.randomUUID()}`)
+  await Promise.all([seedDemoIfEmpty(fresh), seedDemoIfEmpty(fresh), seedDemoIfEmpty(fresh)])
+  expect(await fresh.variants.count()).toBe(9)
+  await fresh.delete()
+})

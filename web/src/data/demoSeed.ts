@@ -4,8 +4,10 @@
 import type { LocalDb, Variant } from './localDb'
 
 export async function seedDemoIfEmpty(db: LocalDb) {
-  if ((await db.categories.count()) > 0) return
+  // Check and insert inside one write transaction, so two tabs (or React's double
+  // start-up in development) can't both seed at once.
   await db.transaction('rw', [db.categories, db.products, db.variants, db.stock, db.favorites], async () => {
+    if ((await db.categories.count()) > 0) return
     await db.categories.bulkAdd([
       { id: 'c-juice', name: 'E-Liquids', sortOrder: 1 },
       { id: 'c-pods', name: 'Pods', sortOrder: 2 },
