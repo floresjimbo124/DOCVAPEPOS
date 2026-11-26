@@ -1,0 +1,14 @@
+{
+  "name": "schema-test",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.6.0"
+  }
+}
