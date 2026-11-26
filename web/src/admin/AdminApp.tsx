@@ -11,6 +11,7 @@ import type { Period } from '../domain/reports'
 import { useTheme } from '../theme'
 import { ErrorBox } from './ErrorBox'
 import { InventoryPage, ProductsPage, type BranchRow } from './catalog'
+import { SettingsPage, StaffPage } from './people'
 import { AttendancePage, DashboardPage, ExpensesPage, LockedPage, TransactionsPage } from './pages'
 import { serverSource } from './serverSource'
 import { previewSource, type BackOfficeSource } from './source'
@@ -222,6 +223,8 @@ function Shell({ source, who, onExit, checkPin, createPin, server }: {
         <ErrorBox resetKey={page}>
         {item.locked && !unlocked ? createPin ? <CreatePin save={createPin} onDone={() => setUnlocked(true)} /> : <PinLock check={checkPin} onUnlock={() => setUnlocked(true)} /> :
           server && page === 'products' ? <ProductsPage client={server.client} isOwner={server.isOwner} /> :
+          server && page === 'staff' ? <StaffPage client={server.client} isOwner={server.isOwner} /> :
+          server && page === 'settings' ? <SettingsPage client={server.client} isOwner={server.isOwner} /> :
           server && page === 'inventory' ? <InventoryPage client={server.client} branches={server.branches} branchId={server.branchId} /> :
           page === 'dashboard' ? <DashboardPage source={source} period={period} /> :
           page === 'transactions' ? <TransactionsPage source={source} period={period} /> :

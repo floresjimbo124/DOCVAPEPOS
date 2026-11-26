@@ -299,3 +299,4 @@ a.link { display: inline-flex; align-items: center; justify-content: center; }
 .table td.warn { color: var(--warn); font-weight: 700; }
 .panel .actions { display: flex; gap: 10px; justify-content: flex-end; }
 .tag { margin-left: 6px; } .tag.off { color: var(--muted); }
+.row-actions { white-space: nowrap; } .row-actions .link { min-height: 36px; margin-right: 8px; }

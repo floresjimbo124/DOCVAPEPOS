@@ -10,6 +10,9 @@ const db = new PGlite({ extensions: { pgcrypto } });
 // Minimal stand-in for what Supabase provides: auth.uid(), the API roles, default grants.
 await db.exec(`
   create schema auth;
+  -- Like Supabase: extensions live in their own schema, not in public.
+  create schema extensions; create extension pgcrypto schema extensions;
+  set search_path = "$user", public, extensions;  -- Supabase's default for sessions
   create function auth.uid() returns uuid language sql stable as
     $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
   create role anon nologin; create role authenticated nologin;
