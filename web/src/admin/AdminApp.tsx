@@ -2,14 +2,16 @@
 // Dashboard / Transactions / Expenses / Attendance. Products, Inventory, Staff and
 // Settings are also locked behind an owner/manager PIN.
 
-import type { Session } from '@supabase/supabase-js'
-import { useEffect, useState } from 'react'
+import type { Session, SupabaseClient } from '@supabase/supabase-js'
+import { useEffect, useMemo, useState } from 'react'
 import { verifyApprover } from '../data/auth'
 import { db } from '../data/localDb'
 import { supabase } from '../data/supabase'
 import type { Period } from '../domain/reports'
 import { useTheme } from '../theme'
+import { InventoryPage, ProductsPage, type BranchRow } from './catalog'
 import { AttendancePage, DashboardPage, ExpensesPage, LockedPage, TransactionsPage } from './pages'
+import { serverSource } from './serverSource'
 import { previewSource, type BackOfficeSource } from './source'
 
 type Page = 'dashboard' | 'transactions' | 'expenses' | 'attendance' | 'products' | 'inventory' | 'staff' | 'settings'
@@ -40,11 +42,12 @@ export function AdminApp() {
     return () => data.subscription.unsubscribe()
   }, [])
 
-  if (preview) return <Shell source={previewSource} who="Preview (this device's data)" onExit={() => setPreview(false)} />
-  if (session && needsPassword) return <SetPassword email={session.user.email ?? ''} onDone={() => { setNeedsPassword(false); history.replaceState(null, '', '/admin') }} />
-  if (session) {
-    return <ServerPending email={session.user.email ?? ''} onSignOut={() => void supabase?.auth.signOut()} />
+  if (preview) {
+    return <Shell source={previewSource} who="Preview (this device's data)" onExit={() => setPreview(false)}
+      checkPin={async (pin) => !!(await verifyApprover(db, pin))} />
   }
+  if (session && needsPassword) return <SetPassword email={session.user.email ?? ''} onDone={() => { setNeedsPassword(false); history.replaceState(null, '', '/admin') }} />
+  if (session && supabase) return <Live client={supabase} email={session.user.email ?? ''} />
   return <Login onPreview={() => setPreview(true)} />
 }
 
@@ -114,20 +117,55 @@ function Login({ onPreview }: { onPreview: () => void }) {
   )
 }
 
-function ServerPending({ email, onSignOut }: { email: string; onSignOut: () => void }) {
-  return (
-    <div className="center-screen">
-      <div className="card login">
-        <h2>Signed in</h2>
-        <p className="muted">{email}</p>
-        <p className="notice">Reports for all branches will appear here once the registers start syncing to the server.</p>
-        <button className="btn" onClick={onSignOut}>Log out</button>
+interface Profile { staff_id: string; full_name: string; role: 'owner' | 'manager' | 'cashier'; pin_set: boolean }
+
+/** Signed in: load who this is and which branches they can see, then show the back office. */
+function Live({ client, email }: { client: SupabaseClient; email: string }) {
+  const [me, setMe] = useState<Profile | null>()
+  const [branches, setBranches] = useState<BranchRow[]>([])
+  const [branchId, setBranchId] = useState<string | null>(null)
+  const [version, setVersion] = useState(0) // bump to reload the reports
+  const signOut = () => void client.auth.signOut()
+
+  useEffect(() => {
+    void (async () => {
+      const [p, b] = await Promise.all([client.rpc('my_profile'), client.from('branches').select('id,name').eq('is_active', true).order('name')])
+      setMe((p.data as Profile[] | null)?.[0] ?? null)
+      setBranches((b.data as BranchRow[] | null) ?? [])
+    })()
+  }, [client])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- version forces a fresh source (reload)
+  const source = useMemo(() => serverSource(client, branchId), [client, branchId, version])
+
+  if (me === undefined) return <p className="center-screen">Loading…</p>
+  if (!me || me.role === 'cashier') {
+    return (
+      <div className="center-screen">
+        <div className="card login">
+          <h2>No back-office access</h2>
+          <p className="muted">{email}</p>
+          <p className="notice">This login isn't linked to an owner or manager. If you just signed up, confirm your email first, then log in again.</p>
+          <button className="btn" onClick={signOut}>Log out</button>
+        </div>
       </div>
-    </div>
+    )
+  }
+  return (
+    <Shell source={source} who={`${me.full_name} · ${me.role === 'owner' ? 'Owner' : 'Manager'}`} onExit={signOut}
+      checkPin={async (pin) => (await client.rpc('check_my_pin', { p_pin: pin })).data === true}
+      pinHint={me.pin_set ? undefined : 'You have no PIN yet. Set it when you set up the first register (tap "Set up this device for a branch" on the PIN screen).'}
+      server={{ client, branches, branchId, setBranchId, isOwner: me.role === 'owner', reload: () => setVersion((v) => v + 1) }} />
   )
 }
 
-function Shell({ source, who, onExit }: { source: BackOfficeSource; who: string; onExit: () => void }) {
+interface ServerCtx {
+  client: SupabaseClient; branches: BranchRow[]; branchId: string | null; setBranchId: (id: string | null) => void
+  isOwner: boolean; reload: () => void
+}
+
+function Shell({ source, who, onExit, checkPin, pinHint, server }: {
+  source: BackOfficeSource; who: string; onExit: () => void; checkPin: (pin: string) => Promise<boolean>; pinHint?: string; server?: ServerCtx
+}) {
   const [page, setPage] = useState<Page>('dashboard')
   const [period, setPeriod] = useState<Period>('today')
   const [unlocked, setUnlocked] = useState(false) // owner/manager PIN entered this session
@@ -164,11 +202,20 @@ function Shell({ source, who, onExit }: { source: BackOfficeSource; who: string;
                 ))}
               </div>
             ) : null}
+            {server && server.branches.length > 1 && (
+              <select className="branch-pick" value={server.branchId ?? ''} onChange={(e) => server.setBranchId(e.target.value || null)} aria-label="Branch">
+                <option value="">All branches</option>
+                {server.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            )}
+            {server && !item.locked && <button className="topbtn" onClick={server.reload}>Refresh</button>}
             <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle dark mode">{theme === 'dark' ? '☀' : '☾'}</button>
           </div>
         </header>
         {source.kind === 'preview' && <p className="notice">Preview: showing only sales and records saved on this device. All branches appear once the server is connected.</p>}
-        {item.locked && !unlocked ? <PinLock onUnlock={() => setUnlocked(true)} /> :
+        {item.locked && !unlocked ? <PinLock check={checkPin} hint={pinHint} onUnlock={() => setUnlocked(true)} /> :
+          server && page === 'products' ? <ProductsPage client={server.client} isOwner={server.isOwner} /> :
+          server && page === 'inventory' ? <InventoryPage client={server.client} branches={server.branches} branchId={server.branchId} /> :
           page === 'dashboard' ? <DashboardPage source={source} period={period} /> :
           page === 'transactions' ? <TransactionsPage source={source} period={period} /> :
           page === 'expenses' ? <ExpensesPage source={source} period={period} /> :
@@ -179,18 +226,18 @@ function Shell({ source, who, onExit }: { source: BackOfficeSource; who: string;
   )
 }
 
-function PinLock({ onUnlock }: { onUnlock: () => void }) {
+function PinLock({ check: verify, hint, onUnlock }: { check: (pin: string) => Promise<boolean>; hint?: string; onUnlock: () => void }) {
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string>()
   async function check() {
-    const who = await verifyApprover(db, pin)
-    if (who) onUnlock()
+    if (await verify(pin)) onUnlock()
     else { setError('PIN not accepted. Only an owner or manager PIN unlocks this page.'); setPin('') }
   }
   return (
     <form className="card pinlock" onSubmit={(e) => { e.preventDefault(); void check() }}>
       <h2>🔒 Enter owner or manager PIN</h2>
       <p className="muted">Products, inventory, staff and settings are protected so prices and staff can't be changed without a PIN.</p>
+      {hint && <p className="notice">{hint}</p>}
       <label className="field"><span>PIN</span>
         <input type="password" inputMode="numeric" autoComplete="off" maxLength={6} value={pin} onChange={(e) => { setPin(e.target.value.replace(/\D/g, '')); setError(undefined) }} /></label>
       {error && <p className="error" role="alert">{error}</p>}

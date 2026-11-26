@@ -236,6 +236,23 @@ await db.query(`update pos_devices set is_active=false where auth_user_id=$1`, [
 await asUser(newDevice);
 check('switched-off device loses access', !(await one(`select * from device_info()`)) && (await db.query(`select * from products`)).rows.length === 0);
 
+// ---------- Back office: PIN check, products, stock ----------
+await asUser(mgrUid);
+check('own PIN opens protected pages', (await one(`select check_my_pin('9999') ok`)).ok === true);
+check('wrong PIN does not', (await one(`select check_my_pin('1234') ok`)).ok === false);
+await expectErr('manager cannot edit products', () => db.query(`insert into products(name) values('Nope')`));
+await expectErr('manager cannot change stock at another branch', () => rpc('adjust_stock', { branch_id: b2, kind: 'stock_in', items: [{ variant_id: v, quantity: 5 }] }), 'only the owner');
+const sBefore = await stockOf(v);
+await rpc('adjust_stock', { branch_id: b, kind: 'stock_in', reason: 'Delivery', items: [{ variant_id: v, quantity: 5 }] });
+check('received stock is added', (await stockOf(v)) === sBefore + 5);
+await rpc('adjust_stock', { branch_id: b, kind: 'count', items: [{ variant_id: v, quantity: 3 }] });
+check('count sets the shelf quantity', (await stockOf(v)) === 3);
+await expectErr('received quantity must be positive', () => rpc('adjust_stock', { branch_id: b, kind: 'stock_in', items: [{ variant_id: v, quantity: 0 }] }), 'more than 0');
+await asUser(ownerUid);
+const np = (await one(`insert into products(name) values('New Pod') returning id`)).id;
+await db.query(`insert into variants(product_id, flavor, price, cost) values($1, 'Grape', 450, 300)`, [np]);
+check('owner can add products and variants', (await one(`select count(*)::int n from variants where product_id=$1`, [np])).n === 1);
+
 await asAdmin();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

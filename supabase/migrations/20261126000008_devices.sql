@@ -80,5 +80,43 @@ begin
   end if;
 end $$;
 
-revoke execute on function is_member(), register_device(uuid, uuid, text), device_info(), my_profile() from public, anon;
-grant execute on function is_member(), register_device(uuid, uuid, text), device_info(), my_profile() to authenticated;
+-- Back office: the signed-in owner/manager re-enters their own PIN to open protected pages.
+create function check_my_pin(p_pin text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from staff s where s.auth_user_id = auth.uid() and s.is_active
+                 and s.role in ('owner', 'manager') and pin_matches(s.pin_hash, p_pin))
+$$;
+
+-- Stock received (adds) or counted (sets the shelf count) at a branch, by the owner or that
+-- branch's manager. Every change goes through the stock ledger.
+-- {branch_id, kind: 'stock_in' | 'count', reason?, items: [{variant_id, quantity}]}
+create function adjust_stock(p jsonb) returns int
+language plpgsql security definer set search_path = public as $$
+declare v_branch uuid := (p->>'branch_id')::uuid; v_kind text := p->>'kind'; it jsonb; v_qty int; v_cur int; n int := 0;
+begin
+  if not (is_owner() or exists (
+      select 1 from staff s join staff_branches sb on sb.staff_id = s.id
+      where s.auth_user_id = auth.uid() and s.is_active and s.role = 'manager' and sb.branch_id = v_branch)) then
+    raise exception 'only the owner or this branch''s manager can change stock';
+  end if;
+  if v_kind not in ('stock_in', 'count') then raise exception 'unknown stock change'; end if;
+  for it in select * from jsonb_array_elements(coalesce(p->'items', '[]')) loop
+    v_qty := (it->>'quantity')::int;
+    if v_kind = 'stock_in' then
+      if v_qty <= 0 then raise exception 'received quantity must be more than 0'; end if;
+    else
+      if v_qty < 0 then raise exception 'count cannot be negative'; end if;
+      select coalesce((select quantity from stock where variant_id = (it->>'variant_id')::uuid and branch_id = v_branch), 0) into v_cur;
+      v_qty := v_qty - v_cur;
+      continue when v_qty = 0;
+    end if;
+    insert into stock_movements (type, variant_id, branch_id, quantity, reason, staff_id)
+    values (case when v_kind = 'stock_in' then 'stock_in' else 'count_adjust' end::movement_type,
+            (it->>'variant_id')::uuid, v_branch, v_qty, nullif(trim(p->>'reason'), ''), current_staff_id());
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+
+revoke execute on function is_member(), register_device(uuid, uuid, text), device_info(), my_profile(), check_my_pin(text), adjust_stock(jsonb) from public, anon;
+grant execute on function is_member(), register_device(uuid, uuid, text), device_info(), my_profile(), check_my_pin(text), adjust_stock(jsonb) to authenticated;

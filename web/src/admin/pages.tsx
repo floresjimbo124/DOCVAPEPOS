@@ -134,8 +134,9 @@ export function ExpensesPage({ source, period }: { source: BackOfficeSource; per
   )
 }
 
-function Thumb({ photo }: { photo?: Blob }) {
-  const url = useMemo(() => (photo ? URL.createObjectURL(photo) : undefined), [photo])
+function Thumb({ photo, src }: { photo?: Blob; src?: string }) {
+  const local = useMemo(() => (photo ? URL.createObjectURL(photo) : undefined), [photo])
+  const url = local ?? src
   useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
   return url ? <img className="thumb" src={url} alt="Selfie" /> : <span className="thumb none">No photo</span>
 }
@@ -166,7 +167,7 @@ export function AttendancePage({ source, period }: { source: BackOfficeSource; p
           <table className="table">
             <thead><tr><th>Selfie</th><th>Staff</th><th>Clock</th><th>Time</th></tr></thead>
             <tbody>{d.punches.map((p) => (
-              <tr key={p.id}><td><Thumb photo={p.photo} /></td><td>{nameOf(p.staffId)}</td>
+              <tr key={p.id}><td><Thumb photo={p.photo} src={p.photoUrl} /></td><td>{nameOf(p.staffId)}</td>
                 <td>{p.kind === 'in' ? 'In' : 'Out'}{p.noPhotoReason ? <small> · no photo ({p.noPhotoReason})</small> : null}</td><td>{dt(p.at)}</td></tr>
             ))}</tbody>
           </table>

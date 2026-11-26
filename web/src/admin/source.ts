@@ -1,5 +1,5 @@
 // Where the back office gets its data. "Preview" reads this device's own records;
-// the server version (all branches) plugs in here once Supabase sync is connected.
+// serverSource.ts reads every branch from the server.
 
 import { db, variantLabel } from '../data/localDb'
 import type { Adjustment } from '../domain/adjust'
@@ -10,11 +10,14 @@ import type { Expense } from '../domain/shift'
 export interface VariantInfo { name: string; label: string; costCentavos: number }
 export interface StaffInfo { id: string; fullName: string; role: string }
 
+/** A clock-in/out: the selfie is a Blob on this device, or a temporary link from the server. */
+export type PunchRow = Omit<Punch, 'photo'> & { photo?: Blob; photoUrl?: string }
+
 export interface BackOfficeSource {
   kind: 'preview' | 'server'
   sales(from: number, to: number): Promise<SalePayload[]>
   expenses(from: number, to: number): Promise<Expense[]>
-  punches(from: number, to: number): Promise<Punch[]>
+  punches(from: number, to: number): Promise<PunchRow[]>
   adjustments(from: number, to: number): Promise<Adjustment[]>
   staff(): Promise<StaffInfo[]>
   variants(): Promise<Map<string, VariantInfo>>
