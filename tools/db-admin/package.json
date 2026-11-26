@@ -1,0 +1,15 @@
+{
+  "name": "db-admin",
+  "version": "1.0.0",
+  "description": "Run one SQL file against the Supabase database. Usage: DATABASE_URL=... node run-sql.mjs file.sql",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "private": "true",
+  "dependencies": {
+    "pg": "^8.23.1"
+  }
+}

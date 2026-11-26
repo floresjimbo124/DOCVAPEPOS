@@ -27,19 +27,53 @@ const NAV: { id: Page; label: string; locked?: boolean }[] = [
 export function AdminApp() {
   const [session, setSession] = useState<Session | null>(null)
   const [preview, setPreview] = useState(false)
+  // Arrived from an invitation or "forgot password" email: ask for a new password first.
+  const [needsPassword, setNeedsPassword] = useState(() => /type=(invite|recovery)/.test(location.hash))
 
   useEffect(() => {
     if (!supabase) return
     void supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
+    const { data } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s)
+      if (event === 'PASSWORD_RECOVERY') setNeedsPassword(true)
+    })
     return () => data.subscription.unsubscribe()
   }, [])
 
   if (preview) return <Shell source={previewSource} who="Preview (this device's data)" onExit={() => setPreview(false)} />
+  if (session && needsPassword) return <SetPassword email={session.user.email ?? ''} onDone={() => { setNeedsPassword(false); history.replaceState(null, '', '/admin') }} />
   if (session) {
     return <ServerPending email={session.user.email ?? ''} onSignOut={() => void supabase?.auth.signOut()} />
   }
   return <Login onPreview={() => setPreview(true)} />
+}
+
+function SetPassword({ email, onDone }: { email: string; onDone: () => void }) {
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+  async function save() {
+    if (pw.length < 8) return setError('Use at least 8 characters.')
+    if (pw !== pw2) return setError('The two passwords do not match.')
+    setBusy(true); setError(undefined)
+    const { error } = await supabase!.auth.updateUser({ password: pw })
+    setBusy(false)
+    if (error) setError(error.message); else onDone()
+  }
+  return (
+    <div className="center-screen">
+      <form className="card login" onSubmit={(e) => { e.preventDefault(); void save() }}>
+        <span className="logo big"><img src="/logo.png" alt="DOCVAPE – Drip of Clouds" /></span>
+        <h2>Set your password</h2>
+        <p className="muted">{email}</p>
+        <label className="field"><span>New password</span><input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></label>
+        <label className="field"><span>Type it again</span><input type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} /></label>
+        {error && <p className="error" role="alert">{error}</p>}
+        <button className="btn primary xl" disabled={busy || !pw || !pw2}>{busy ? 'Saving…' : 'Save password'}</button>
+      </form>
+    </div>
+  )
 }
 
 function Login({ onPreview }: { onPreview: () => void }) {
