@@ -12,8 +12,6 @@ import { Checkout } from './Checkout'
 interface Props { branchId: string; shiftId: string; staffId: string; branchName?: string; staffName?: string }
 
 const LOW_STOCK = 3
-// One accent per category position, so cashiers learn tiles by colour.
-const ACCENTS = ['#0d9488', '#7c3aed', '#ea580c', '#2563eb', '#db2777', '#65a30d', '#ca8a04']
 
 function useOnline() {
   const [online, setOnline] = useState(navigator.onLine)
@@ -33,11 +31,11 @@ const Money = ({ centavos, className }: { centavos: number; className?: string }
 const StockBadge = ({ n }: { n: number }) =>
   n <= 0 ? <span className="stock out">Out</span> : n <= LOW_STOCK ? <span className="stock low">{n} left</span> : <span className="stock">{n}</span>
 
-export function Register({ branchName = 'Demo branch', staffName = 'Demo cashier', ...ids }: Props) {
+export function Register({ branchName = 'P. Campa Branch', staffName = 'Demo cashier', ...ids }: Props) {
   const [cart, setCart] = useState<CartState>(emptyCart)
   const [query, setQuery] = useState('')
   const [categoryId, setCategoryId] = useState<string>()
-  const [picking, setPicking] = useState<{ product: Product; rows: VariantRow[]; accent: string }>()
+  const [picking, setPicking] = useState<{ product: Product; rows: VariantRow[] }>()
   const [checkingOut, setCheckingOut] = useState(false)
   const [cartOpen, setCartOpen] = useState(false)
   const [toast, setToast] = useState<string>()
@@ -47,7 +45,6 @@ export function Register({ branchName = 'Demo branch', staffName = 'Demo cashier
 
   const categories = useLiveQuery(() => db.categoriesSorted(), []) ?? []
   const activeCat = categoryId ?? categories[0]?.id
-  const accentOf = (catId?: string | null) => ACCENTS[Math.max(0, categories.findIndex((c) => c.id === catId)) % ACCENTS.length]
   const products = useLiveQuery(() => (activeCat ? db.productsIn(activeCat) : []), [activeCat]) ?? []
   const favorites = useLiveQuery(() => db.favoriteRows(), []) ?? []
   const results = useLiveQuery(() => db.search(query), [query]) ?? []
@@ -65,7 +62,7 @@ export function Register({ branchName = 'Demo branch', staffName = 'Demo cashier
   async function openProduct(p: Product) {
     const rows = await db.variantsOf(p.id)
     if (rows.length === 1) add(rows[0])
-    else setPicking({ product: p, rows, accent: accentOf(p.categoryId) })
+    else setPicking({ product: p, rows })
   }
 
   function onComplete(changeCentavos: number) {
@@ -75,7 +72,7 @@ export function Register({ branchName = 'Demo branch', staffName = 'Demo cashier
   }
 
   const variantTile = (r: VariantRow) => (
-    <button key={r.variant.id} className="tile" style={{ '--accent': accentOf(r.product.categoryId) } as React.CSSProperties}
+    <button key={r.variant.id} className="tile"
       disabled={r.stock <= 0} onClick={() => add(r)}>
       <span className="tile-name">{r.product.name}</span>
       <span className="tile-sub">{r.label}</span>
@@ -123,7 +120,10 @@ export function Register({ branchName = 'Demo branch', staffName = 'Demo cashier
   return (
     <div className="pos">
       <header className="topbar">
-        <div className="brand"><span className="logo">DV</span><div><b>{branchName}</b><small>{staffName}</small></div></div>
+        <div className="brand">
+          <span className="logo"><img src="/logo.png" alt="DOCVAPE – Drip of Clouds" /></span>
+          <div><b>{branchName}</b><small>{staffName}</small></div>
+        </div>
         <div className="status">
           <span className={online ? 'pill ok' : 'pill off'}><i />{online ? 'Online' : 'Offline – still selling'}</span>
           {pending > 0 && <span className="pill warn">{pending} to sync</span>}
@@ -153,13 +153,13 @@ export function Register({ branchName = 'Demo branch', staffName = 'Demo cashier
             )}
             <nav className="tabs" aria-label="Categories">
               {categories.map((c) => (
-                <button key={c.id} className={c.id === activeCat ? 'tab on' : 'tab'} style={{ '--accent': accentOf(c.id) } as React.CSSProperties}
+                <button key={c.id} className={c.id === activeCat ? 'tab on' : 'tab'}
                   onClick={() => setCategoryId(c.id)}>{c.name}</button>
               ))}
             </nav>
             <div className="grid">
               {products.map((p) => (
-                <button key={p.id} className="tile product" style={{ '--accent': accentOf(p.categoryId) } as React.CSSProperties} onClick={() => openProduct(p)}>
+                <button key={p.id} className="tile product" onClick={() => openProduct(p)}>
                   <span className="tile-name">{p.name}</span>
                   <span className="tile-sub">{p.brand}</span>
                   <span className="tile-foot"><span className="hint">{p.isDevice ? 'Choose color ›' : 'Choose flavor ›'}</span></span>
@@ -184,7 +184,7 @@ export function Register({ branchName = 'Demo branch', staffName = 'Demo cashier
 
       {picking && (
         <div className="overlay" onClick={() => setPicking(undefined)}>
-          <div className="drawer bottom picker" style={{ '--accent': picking.accent } as React.CSSProperties} onClick={(e) => e.stopPropagation()}>
+          <div className="drawer bottom picker" onClick={(e) => e.stopPropagation()}>
             <div className="drawer-head">
               <div><h2>{picking.product.name}</h2><small>{picking.product.brand}</small></div>
               <button className="icon" aria-label="Close" onClick={() => setPicking(undefined)}>✕</button>

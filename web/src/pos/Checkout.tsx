@@ -122,7 +122,7 @@ export function Checkout({ cart, setCart, ids, onCancel, onComplete }: Props) {
           <h3>Payment</h3>
           <div className="methods" role="radiogroup" aria-label="Payment method">
             {METHODS.map((m) => (
-              <button type="button" key={m.id} role="radio" aria-checked={method === m.id} className={`method ${m.id} ${method === m.id ? 'on' : ''}`}
+              <button type="button" key={m.id} role="radio" aria-checked={method === m.id} className={method === m.id ? 'method on' : 'method'}
                 onClick={() => { setMethod(m.id); setError(undefined) }}>
                 <b>{m.label}</b><small>{m.note}</small>
               </button>
