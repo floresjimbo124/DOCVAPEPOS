@@ -1,0 +1,52 @@
+/* Functional styles only - visual design comes later. */
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; font-size: 16px; }
+button, input, select { font: inherit; min-height: 44px; } /* touch-sized */
+button { cursor: pointer; border: 1px solid #bbb; border-radius: 8px; background: #fff; padding: 0 12px; }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: #0f766e; color: #fff; border-color: #0f766e; }
+input, select { border: 1px solid #bbb; border-radius: 8px; padding: 0 10px; width: 100%; }
+
+.register { display: grid; grid-template-columns: 1fr 360px; grid-template-rows: auto 1fr; height: 100dvh; }
+.register header { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #ddd; }
+.register h1 { font-size: 20px; margin: 0; }
+.badge { padding: 4px 10px; border-radius: 999px; background: #eee; }
+.badge.warn { background: #fde68a; }
+.catalogue { overflow: auto; padding: 12px; }
+.catalogue h2 { font-size: 14px; margin: 12px 0 6px; }
+.row { display: flex; gap: 8px; overflow-x: auto; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-top: 8px; }
+.tile { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; min-height: 72px; padding: 8px; text-align: left; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.chip.on { background: #0f766e; color: #fff; }
+
+.cart-side { border-left: 1px solid #ddd; overflow: hidden; }
+.cart { display: flex; flex-direction: column; height: 100%; padding: 12px; gap: 8px; }
+.cart ul { list-style: none; margin: 0; padding: 0; flex: 1; overflow: auto; }
+.cart li { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee; }
+.cart li small { display: block; color: #555; }
+.qty { display: flex; align-items: center; gap: 6px; }
+.qty button { width: 44px; padding: 0; }
+.total { display: flex; justify-content: space-between; font-size: 20px; }
+.cart-bar { display: none; }
+
+.sheet { position: fixed; inset: 0; background: rgb(0 0 0 / .4); display: flex; align-items: flex-end; justify-content: center; }
+.sheet > * { background: #fff; width: min(640px, 100%); max-height: 90dvh; overflow: auto; padding: 16px; border-radius: 16px 16px 0 0; }
+.checkout { display: flex; flex-direction: column; gap: 10px; }
+.checkout fieldset { border: 1px solid #ddd; border-radius: 8px; display: flex; flex-direction: column; gap: 8px; }
+.check { display: flex; gap: 10px; align-items: center; }
+.check input { width: 24px; min-height: 24px; }
+.segmented { display: flex; gap: 6px; }
+.segmented button { flex: 1; }
+.segmented .on { background: #0f766e; color: #fff; }
+.actions { display: flex; gap: 8px; }
+.actions button { flex: 1; }
+.error { color: #b91c1c; }
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: #111; color: #fff; padding: 10px 16px; border-radius: 8px; }
+
+/* Phone: one column, cart opens from a bottom bar. */
+@media (max-width: 799px) {
+  .register { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
+  .cart-side { display: none; }
+  .cart-bar { display: block; margin: 8px; }
+}
