@@ -1,7 +1,27 @@
 // Sample catalogue so the register can be tried before the real product list
 // arrives. Replaced by server sync later.
 
-import type { LocalDb, Variant } from './localDb'
+import { hashPin } from './auth'
+import type { DeviceSettings, LocalDb, StaffRow, Variant } from './localDb'
+
+export const DEMO_BRANCH: DeviceSettings = { branchId: '00000000-0000-4000-8000-000000000001', branchName: 'P. Campa Branch', label: 'Counter tablet' }
+/** Demo logins: cashier 1234, manager 9999, owner 0000. */
+export const DEMO_STAFF = [
+  { id: '00000000-0000-4000-8000-0000000000a1', fullName: 'Ana (Cashier)', role: 'cashier', pin: '1234' },
+  { id: '00000000-0000-4000-8000-0000000000a2', fullName: 'Ben (Manager)', role: 'manager', pin: '9999' },
+  { id: '00000000-0000-4000-8000-0000000000a3', fullName: 'Owner', role: 'owner', pin: '0000' },
+] as const
+
+/** Demo device + staff. Hashes are made first: only Dexie calls may run inside its transaction. */
+export async function seedDemoStaffIfEmpty(db: LocalDb) {
+  if ((await db.staff.count()) > 0) return
+  const staff: StaffRow[] = await Promise.all(DEMO_STAFF.map(async ({ pin, ...s }) => ({ ...s, pinHash: await hashPin(pin), isActive: true })))
+  await db.transaction('rw', db.staff, db.settings, async () => {
+    if ((await db.staff.count()) > 0) return
+    await db.staff.bulkAdd(staff)
+    if (!(await db.settings.get('device'))) await db.settings.put({ key: 'device', value: DEMO_BRANCH })
+  })
+}
 
 export async function seedDemoIfEmpty(db: LocalDb) {
   // Check and insert inside one write transaction, so two tabs (or React's double

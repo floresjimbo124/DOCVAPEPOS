@@ -4,12 +4,20 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useState } from 'react'
 import CountUp from '../components/reactbits/CountUp'
-import { db, type Product, type VariantRow } from '../data/localDb'
+import { db, type DeviceSettings, type Product, type ShiftRow, type StaffRow, type VariantRow } from '../data/localDb'
 import { addToCart, discountAmount, emptyCart, peso, setQuantity, subtotal, total, type CartState } from '../domain/cart'
 import { useTheme } from '../theme'
+import type { ShiftSummary } from '../domain/shift'
 import { Checkout } from './Checkout'
+import { CashMoveSheet, CloseShiftSheet } from './Shift'
 
-interface Props { branchId: string; shiftId: string; staffId: string; branchName?: string; staffName?: string }
+interface Props {
+  device: DeviceSettings
+  staff: StaffRow
+  shift: ShiftRow
+  onLock: () => void
+  onShiftClosed: (r: { shift: ShiftRow; summary: ShiftSummary }) => void
+}
 
 const LOW_STOCK = 3
 
@@ -31,7 +39,9 @@ const Money = ({ centavos, className }: { centavos: number; className?: string }
 const StockBadge = ({ n }: { n: number }) =>
   n <= 0 ? <span className="stock out">Out</span> : n <= LOW_STOCK ? <span className="stock low">{n} left</span> : <span className="stock">{n}</span>
 
-export function Register({ branchName = 'P. Campa Branch', staffName = 'Demo cashier', ...ids }: Props) {
+export function Register({ device, staff, shift, onLock, onShiftClosed }: Props) {
+  const ids = { branchId: device.branchId, shiftId: shift.id, staffId: staff.id }
+  const [panel, setPanel] = useState<'cash' | 'close'>()
   const [cart, setCart] = useState<CartState>(emptyCart)
   const [query, setQuery] = useState('')
   const [categoryId, setCategoryId] = useState<string>()
@@ -48,7 +58,7 @@ export function Register({ branchName = 'P. Campa Branch', staffName = 'Demo cas
   const products = useLiveQuery(() => (activeCat ? db.productsIn(activeCat) : []), [activeCat]) ?? []
   const favorites = useLiveQuery(() => db.favoriteRows(), []) ?? []
   const results = useLiveQuery(() => db.search(query), [query]) ?? []
-  const pending = useLiveQuery(() => db.outbox.count(), []) ?? 0
+  const pending = useLiveQuery(() => db.pendingCount(), []) ?? 0
   const itemCount = cart.lines.reduce((s, l) => s + l.quantity, 0)
 
   const add = (r: VariantRow) => {
@@ -122,11 +132,16 @@ export function Register({ branchName = 'P. Campa Branch', staffName = 'Demo cas
       <header className="topbar">
         <div className="brand">
           <span className="logo"><img src="/logo.png" alt="DOCVAPE – Drip of Clouds" /></span>
-          <div><b>{branchName}</b><small>{staffName}</small></div>
+          <div><b>{device.branchName}</b><small>{staff.fullName}</small></div>
         </div>
         <div className="status">
           <span className={online ? 'pill ok' : 'pill off'}><i />{online ? 'Online' : 'Offline – still selling'}</span>
           {pending > 0 && <span className="pill warn">{pending} to sync</span>}
+          <button className="topbtn" onClick={() => setPanel('cash')}>Cash in/out</button>
+          <button className="topbtn" onClick={() => setPanel('close')} disabled={cart.lines.length > 0}
+            title={cart.lines.length ? 'Finish or clear the current sale first' : undefined}>Close shift</button>
+          <button className="topbtn" onClick={onLock} disabled={cart.lines.length > 0}
+            title={cart.lines.length ? 'Finish or clear the current sale first' : 'Lock the register'}>Lock</button>
           <button className="theme-toggle" onClick={toggleTheme} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>{theme === 'dark' ? '☀' : '☾'}</button>
         </div>
@@ -202,6 +217,8 @@ export function Register({ branchName = 'P. Campa Branch', staffName = 'Demo cas
       )}
 
       {checkingOut && <Checkout cart={cart} setCart={setCart} ids={ids} onCancel={() => setCheckingOut(false)} onComplete={onComplete} />}
+      {panel === 'cash' && <CashMoveSheet shift={shift} staff={staff} onClose={() => setPanel(undefined)} />}
+      {panel === 'close' && <CloseShiftSheet shift={shift} staff={staff} onCancel={() => setPanel(undefined)} onClosed={onShiftClosed} />}
       {toast && <div className="toast" role="status">✓ {toast}</div>}
     </div>
   )

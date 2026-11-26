@@ -132,6 +132,38 @@ await expectErr('other branch device cannot sell into Main', () => complete(sale
 await asUser(ownerUid);
 check('owner sees all branches', (await db.query(`select * from branches`)).rows.length === 2);
 
+// ---------- Shift sync + device staff ----------
+await asUser(deviceUid);
+const ds = (await db.query(`select * from device_staff()`)).rows;
+check('device gets its branch staff + owner for offline PIN login', ds.length === 3 && ds.every((r) => r.pin_hash));
+await asUser(ownerUid);
+await expectErr('non-device cannot pull PIN hashes', () => db.query(`select * from device_staff()`), 'not a POS device');
+
+await asUser(deviceUid);
+const rpc = (fn, p) => db.query(`select ${fn}($1::jsonb) as r`, [JSON.stringify(p)]).then((x) => x.rows[0].r);
+const mv = { id: randomUUID(), shift_id: shift, staff_id: cashier, amount: '-200.00', reason: 'Bought water' };
+await rpc('add_cash_movement', mv); await rpc('add_cash_movement', mv);
+await asAdmin();
+check('cash movement retried is stored once', (await one(`select count(*)::int n from cash_movements where shift_id=$1`, [shift])).n === 1);
+await asUser(deviceUid);
+await expectErr('cash movement needs reason', () => rpc('add_cash_movement', { ...mv, id: randomUUID(), reason: ' ' }), 'reason');
+
+const closeAt = new Date(Date.now() + 60_000).toISOString();
+const z1 = await rpc('close_shift', { id: shift, closed_by: cashier, counted_cash: '1000', expected_cash: '1000', closed_at: closeAt });
+check('close_shift assigns Z #1 for the branch', z1 === 1);
+check('close_shift retried returns same Z', (await rpc('close_shift', { id: shift, closed_by: cashier })) === 1);
+await complete(sale({ client_created_at: new Date(Date.now()).toISOString() }));
+ok('offline sale made before close is accepted after close');
+await expectErr('sale made after close is rejected', () => complete(sale({ client_created_at: new Date(Date.now() + 120_000).toISOString() })), 'no open shift');
+
+const shift2 = randomUUID();
+const op = { id: shift2, branch_id: b, opened_by: manager, starting_cash: '500.00' };
+await rpc('open_shift', op); await rpc('open_shift', op);
+ok('open_shift retried is stored once');
+check('next close gets Z #2', (await rpc('close_shift', { id: shift2, closed_by: manager, counted_cash: '500', expected_cash: '500' })) === 2);
+await asUser(device2Uid);
+await expectErr('other branch device cannot open shift here', () => rpc('open_shift', { id: randomUUID(), branch_id: b, opened_by: manager }), 'not allowed');
+
 await asAdmin();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

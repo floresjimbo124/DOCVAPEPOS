@@ -1,0 +1,40 @@
+import { expect, test } from 'vitest'
+import type { SalePayload } from './cart'
+import { overShort, summarizeShift, type CashMovement } from './shift'
+
+const sale = (over: Partial<SalePayload>): SalePayload => ({
+  id: crypto.randomUUID(), branch_id: 'b', shift_id: 's', staff_id: 'u', age_verified: true, manual_receipt_no: null,
+  client_created_at: '', items: [], discounts: [], payments: [], ...over,
+})
+const move = (amountCentavos: number): CashMovement =>
+  ({ id: crypto.randomUUID(), shiftId: 's', amountCentavos, reason: 'x', staffId: 'u', createdAt: 0 })
+
+test('expected cash = starting + cash sales + cash in − cash out', () => {
+  const sales = [
+    sale({ items: [{ variant_id: 'a', quantity: 2, unit_price: '350.00' }], payments: [{ method: 'cash', amount: '700.00' }], manual_receipt_no: '0010' }),
+    sale({ items: [{ variant_id: 'b', quantity: 1, unit_price: '550.00' }], payments: [{ method: 'gcash', amount: '550.00', reference_no: 'R1' }], manual_receipt_no: '0009' }),
+    sale({
+      items: [{ variant_id: 'a', quantity: 1, unit_price: '350.00' }],
+      discounts: [{ kind: 'senior', value: 20, amount: '100.00', id_holder: 'L', id_number: '1' }],
+      payments: [{ method: 'cash', amount: '100.00' }, { method: 'maya', amount: '150.00', reference_no: 'M1' }],
+      manual_receipt_no: '0011',
+    }),
+  ]
+  const s = summarizeShift(100000, sales, [move(50000), move(-20000)])
+  expect(s.saleCount).toBe(3)
+  expect(s.grossCentavos).toBe(160000)
+  expect(s.discountCentavos).toBe(10000)
+  expect(s.netCentavos).toBe(150000)
+  expect(s.byMethod).toEqual({ cash: 80000, gcash: 55000, maya: 15000 })
+  expect(s.expectedCashCentavos).toBe(100000 + 80000 + 50000 - 20000)
+  expect(s.seniorPwdCount).toBe(1)
+  expect([s.firstReceiptNo, s.lastReceiptNo]).toEqual(['0009', '0011'])
+  expect(overShort(s, 210000)).toBe(0)
+  expect(overShort(s, 209500)).toBe(-500)
+})
+
+test('empty shift expects only the starting cash', () => {
+  const s = summarizeShift(100000, [], [])
+  expect(s.expectedCashCentavos).toBe(100000)
+  expect(s.firstReceiptNo).toBeUndefined()
+})

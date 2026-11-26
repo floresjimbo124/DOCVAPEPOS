@@ -1,0 +1,64 @@
+import 'fake-indexeddb/auto'
+import { afterEach, beforeEach, expect, test } from 'vitest'
+import { verifyApprover, verifyPin } from './auth'
+import { DEMO_BRANCH, seedDemoIfEmpty, seedDemoStaffIfEmpty } from './demoSeed'
+import { LocalDb, type DeviceSettings } from './localDb'
+
+let db: LocalDb
+beforeEach(async () => {
+  db = new LocalDb(`test-${crypto.randomUUID()}`)
+  await seedDemoIfEmpty(db)
+  await seedDemoStaffIfEmpty(db)
+})
+afterEach(() => db.delete())
+const B = DEMO_BRANCH.branchId
+
+test('PIN login works offline against cached hashes', async () => {
+  expect((await verifyPin(db, '1234'))?.fullName).toBe('Ana (Cashier)')
+  expect(await verifyPin(db, '1111')).toBeUndefined()
+  expect(await verifyPin(db, '12')).toBeUndefined()
+  expect(await verifyApprover(db, '1234')).toBeUndefined() // cashier can't approve
+  expect((await verifyApprover(db, '9999'))?.role).toBe('manager')
+  await db.staff.update('00000000-0000-4000-8000-0000000000a1', { isActive: false })
+  expect(await verifyPin(db, '1234')).toBeUndefined() // deactivated staff locked out
+  expect((await db.getSetting<DeviceSettings>('device'))?.branchName).toBe('P. Campa Branch')
+})
+
+test('staff seeding twice at once is safe', async () => {
+  const fresh = new LocalDb(`test-${crypto.randomUUID()}`)
+  await Promise.all([seedDemoStaffIfEmpty(fresh), seedDemoStaffIfEmpty(fresh)])
+  expect(await fresh.staff.count()).toBe(3)
+  await fresh.delete()
+})
+
+test('open shift, sell, cash in/out, close with Z-reading', async () => {
+  const shift = await db.openShift(B, 'ana', 100000)
+  await expect(db.openShift(B, 'ben', 0)).rejects.toThrow(/already open/)
+  expect((await db.openShiftFor(B))?.id).toBe(shift.id)
+
+  await db.queueSale({
+    id: 's1', branch_id: B, shift_id: shift.id, staff_id: 'ana', age_verified: true, manual_receipt_no: '0001',
+    client_created_at: '', discounts: [], items: [{ variant_id: 'v-pod-straw', quantity: 1, unit_price: '550.00' }],
+    payments: [{ method: 'cash', amount: '550.00', tendered: '1000.00' }],
+  })
+  await db.addCashMove(shift.id, 'ana', -20000, 'Bought water')
+  await expect(db.addCashMove(shift.id, 'ana', 5000, '  ')).rejects.toThrow(/Reason/)
+
+  const live = await db.shiftSummary(shift)
+  expect(live.expectedCashCentavos).toBe(100000 + 55000 - 20000)
+
+  const { shift: closed, summary } = await db.closeShift(shift.id, 'ana', 134500)
+  expect(closed.zNo).toBe(1)
+  expect(summary.saleCount).toBe(1)
+  expect(closed.countedCentavos! - closed.expectedCentavos!).toBe(-500) // ₱5 short
+  expect(await db.openShiftFor(B)).toBeUndefined()
+  await expect(db.closeShift(shift.id, 'ana', 0)).rejects.toThrow(/not open/)
+
+  const next = await db.openShift(B, 'ben', 50000)
+  expect((await db.closeShift(next.id, 'ben', 50000)).shift.zNo).toBe(2) // Z numbers keep counting
+
+  // everything is queued for the server: 1 sale + open/move/close + open/close
+  expect(await db.pendingCount()).toBe(1 + 5)
+  expect((await db.ops.toArray()).map((o) => o.kind).sort()).toEqual(
+    ['cash_movement', 'shift_close', 'shift_close', 'shift_open', 'shift_open'])
+})

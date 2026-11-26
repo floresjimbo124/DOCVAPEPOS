@@ -3,6 +3,7 @@
 
 import Dexie, { type EntityTable } from 'dexie'
 import type { SalePayload } from '../domain/cart'
+import { summarizeShift, type CashMovement, type ShiftSummary } from '../domain/shift'
 
 export interface Category { id: string; name: string; sortOrder: number }
 export interface Product { id: string; categoryId: string | null; name: string; brand?: string; isDevice: boolean; isActive: boolean }
@@ -13,7 +14,19 @@ export interface Variant {
 /** Stock at THIS device's branch (refreshed on sync, decremented locally on sale). */
 export interface StockRow { variantId: string; quantity: number }
 export interface Favorite { variantId: string; sortOrder: number }
-export interface OutboxRow { saleId: string; payload: SalePayload; createdAt: number; attempts: number; lastError?: string }
+export interface OutboxRow { saleId: string; shiftId: string; payload: SalePayload; createdAt: number; attempts: number; lastError?: string }
+
+export type Role = 'owner' | 'manager' | 'cashier'
+/** Staff allowed at this branch, cached for offline PIN login (PIN stored only as a bcrypt hash). */
+export interface StaffRow { id: string; fullName: string; role: Role; pinHash: string; isActive: boolean }
+export interface DeviceSettings { branchId: string; branchName: string; label: string }
+export interface ShiftRow {
+  id: string; branchId: string; openedBy: string; openedAt: number; startingCentavos: number
+  closedAt?: number; closedBy?: string; countedCentavos?: number; expectedCentavos?: number; zNo?: number
+}
+/** Shift events waiting to be sent to the server (sales use the outbox). */
+export interface OpRow { id: string; kind: 'shift_open' | 'cash_movement' | 'shift_close'; payload: unknown; createdAt: number; attempts: number; lastError?: string }
+export interface SettingRow { key: string; value: unknown }
 
 export interface VariantRow { variant: Variant; product: Product; stock: number; label: string }
 
@@ -24,6 +37,11 @@ export class LocalDb extends Dexie {
   stock!: EntityTable<StockRow, 'variantId'>
   favorites!: EntityTable<Favorite, 'variantId'>
   outbox!: EntityTable<OutboxRow, 'saleId'>
+  staff!: EntityTable<StaffRow, 'id'>
+  shifts!: EntityTable<ShiftRow, 'id'>
+  cashMoves!: EntityTable<CashMovement, 'id'>
+  ops!: EntityTable<OpRow, 'id'>
+  settings!: EntityTable<SettingRow, 'key'>
 
   constructor(name = 'docvape_pos') {
     super(name)
@@ -35,7 +53,74 @@ export class LocalDb extends Dexie {
       favorites: 'variantId, sortOrder',
       outbox: 'saleId, createdAt',
     })
+    this.version(2).stores({
+      outbox: 'saleId, createdAt, shiftId',
+      staff: 'id',
+      shifts: 'id, branchId, openedAt',
+      cashMoves: 'id, shiftId',
+      ops: 'id, createdAt',
+      settings: 'key',
+    }).upgrade((tx) => tx.table('outbox').toCollection().modify((r: OutboxRow) => { r.shiftId = r.payload.shift_id }))
   }
+
+  // ---------- Device, staff, shifts ----------
+  async getSetting<T>(key: string): Promise<T | undefined> { return (await this.settings.get(key))?.value as T | undefined }
+  setSetting(key: string, value: unknown) { return this.settings.put({ key, value }) }
+
+  async openShiftFor(branchId: string): Promise<ShiftRow | undefined> {
+    return (await this.shifts.where('branchId').equals(branchId).toArray()).find((s) => s.closedAt == null)
+  }
+
+  private queueOp(kind: OpRow['kind'], payload: unknown) {
+    return this.ops.add({ id: crypto.randomUUID(), kind, payload, createdAt: Date.now(), attempts: 0 })
+  }
+
+  openShift(branchId: string, staffId: string, startingCentavos: number): Promise<ShiftRow> {
+    return this.transaction('rw', this.shifts, this.ops, async () => {
+      if (await this.openShiftFor(branchId)) throw new Error('A shift is already open at this branch')
+      const shift: ShiftRow = { id: crypto.randomUUID(), branchId, openedBy: staffId, openedAt: Date.now(), startingCentavos }
+      await this.shifts.add(shift)
+      await this.queueOp('shift_open', { id: shift.id, branch_id: branchId, opened_by: staffId,
+        starting_cash: (startingCentavos / 100).toFixed(2), opened_at: new Date(shift.openedAt).toISOString() })
+      return shift
+    })
+  }
+
+  async addCashMove(shiftId: string, staffId: string, amountCentavos: number, reason: string) {
+    if (!reason.trim()) throw new Error('Reason is required')
+    if (!amountCentavos) throw new Error('Enter an amount')
+    return this.transaction('rw', this.cashMoves, this.ops, async () => {
+      const m: CashMovement = { id: crypto.randomUUID(), shiftId, amountCentavos, reason: reason.trim(), staffId, createdAt: Date.now() }
+      await this.cashMoves.add(m)
+      await this.queueOp('cash_movement', { id: m.id, shift_id: shiftId, staff_id: staffId,
+        amount: (amountCentavos / 100).toFixed(2), reason: m.reason, created_at: new Date(m.createdAt).toISOString() })
+    })
+  }
+
+  async shiftSummary(shift: ShiftRow): Promise<ShiftSummary> {
+    const sales = (await this.outbox.where('shiftId').equals(shift.id).toArray()).map((r) => r.payload)
+    const moves = await this.cashMoves.where('shiftId').equals(shift.id).toArray()
+    return summarizeShift(shift.startingCentavos, sales, moves)
+  }
+
+  /** Closes the shift with the counted cash; assigns the next Z-reading number for this device. */
+  closeShift(shiftId: string, staffId: string, countedCentavos: number): Promise<{ shift: ShiftRow; summary: ShiftSummary }> {
+    return this.transaction('rw', [this.shifts, this.outbox, this.cashMoves, this.ops, this.settings], async () => {
+      const shift = await this.shifts.get(shiftId)
+      if (!shift || shift.closedAt != null) throw new Error('Shift is not open')
+      const summary = await this.shiftSummary(shift)
+      const zNo = ((await this.getSetting<number>('zCounter')) ?? 0) + 1
+      await this.setSetting('zCounter', zNo)
+      const closed: ShiftRow = { ...shift, closedAt: Date.now(), closedBy: staffId, countedCentavos,
+        expectedCentavos: summary.expectedCashCentavos, zNo }
+      await this.shifts.put(closed)
+      await this.queueOp('shift_close', { id: shiftId, closed_by: staffId, counted_cash: (countedCentavos / 100).toFixed(2),
+        expected_cash: (summary.expectedCashCentavos / 100).toFixed(2), z_reading_no: zNo, closed_at: new Date(closed.closedAt!).toISOString() })
+      return { shift: closed, summary }
+    })
+  }
+
+  pendingCount = async () => (await this.outbox.count()) + (await this.ops.count())
 
   private async rows(variants: Variant[]): Promise<VariantRow[]> {
     const active = variants.filter((v) => v.isActive)
@@ -76,7 +161,7 @@ export class LocalDb extends Dexie {
   /** Saves the sale to the outbox and deducts local stock in one transaction. */
   queueSale(payload: SalePayload) {
     return this.transaction('rw', this.outbox, this.stock, async () => {
-      await this.outbox.add({ saleId: payload.id, payload, createdAt: Date.now(), attempts: 0 })
+      await this.outbox.add({ saleId: payload.id, shiftId: payload.shift_id, payload, createdAt: Date.now(), attempts: 0 })
       for (const item of payload.items) {
         const cur = await this.stock.get(item.variant_id)
         await this.stock.put({ variantId: item.variant_id, quantity: (cur?.quantity ?? 0) - item.quantity })

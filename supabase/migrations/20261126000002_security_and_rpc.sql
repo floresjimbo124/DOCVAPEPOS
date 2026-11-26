@@ -105,7 +105,10 @@ begin
   if v_id is null then raise exception 'sale id required'; end if;
   if exists (select 1 from sales where id = v_id) then return v_id; end if;  -- already synced
   if not can_access_branch(v_branch) then raise exception 'not allowed'; end if;
-  if not exists (select 1 from shifts where id = v_shift and branch_id = v_branch and closed_at is null) then
+  -- The shift must be open, or (offline sync) the sale must have been made before it closed.
+  if not exists (select 1 from shifts where id = v_shift and branch_id = v_branch
+                 and (closed_at is null
+                      or coalesce((p_sale->>'client_created_at')::timestamptz, now()) <= closed_at)) then
     raise exception 'no open shift for this branch';
   end if;
   if jsonb_array_length(coalesce(p_sale->'items', '[]')) = 0 then raise exception 'sale has no items'; end if;

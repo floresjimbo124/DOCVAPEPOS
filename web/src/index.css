@@ -163,3 +163,50 @@ small { color: var(--muted); }
 @keyframes pulse { 50% { transform: scale(1.02); } }
 
 @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
+
+/* ---------- Login, shift screens, reports ---------- */
+.center-screen { min-height: 100dvh; display: grid; place-items: center; padding: 16px; }
+.card { width: min(420px, 100%); display: grid; gap: 14px; padding: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
+.card h2 { font-size: 22px; }
+.login { justify-items: center; text-align: center; }
+.login .error, .login .btn { width: 100%; }
+.logo.big img { height: 64px; }
+.dots { display: flex; gap: 14px; height: 18px; align-items: center; }
+.dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--muted); }
+.dots i.on { background: var(--text); border-color: var(--text); }
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; }
+.key { height: 64px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); font-size: 26px; font-weight: 600; }
+.key.fn { font-size: 16px; color: var(--muted); }
+.key:active { transform: scale(.97); }
+.topbtn { height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: none; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.topbtn:disabled { opacity: .4; }
+.report { margin: 0; display: grid; gap: 8px; font-variant-numeric: tabular-nums; }
+.report div { display: flex; justify-content: space-between; gap: 12px; }
+.report dt { color: var(--muted); }
+.report dd { margin: 0; }
+.report .strong { padding-top: 8px; border-top: 1px solid var(--line); font-weight: 700; }
+.report .strong dt { color: var(--text); }
+.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.plain li { display: flex; justify-content: space-between; gap: 12px; font-variant-numeric: tabular-nums; }
+.balance { margin: 0; padding: 10px 12px; border-radius: 10px; font-weight: 700; text-align: center; border: 1px solid var(--line); }
+.balance.ok { color: var(--ok); }
+.balance.off { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+.zreport { justify-items: stretch; }
+.zreport .logo { justify-self: center; }
+.zreport h2 { text-align: center; }
+.zreport > .muted { text-align: center; }
+
+@media (max-width: 799px) {
+  .topbtn { padding: 0 10px; font-size: 13px; }
+  .status .pill.ok { display: none; } /* keep the phone top bar uncluttered; "offline" still shows */
+  .topbar { flex-wrap: wrap; }
+}
+
+@media print {
+  body { background: #fff; color: #000; }
+  .zreport { border: 0; padding: 0; }
+  .zreport .actions { display: none; }
+}
+
+.actions { display: flex; gap: 8px; }
+.actions > * { flex: 1; }
